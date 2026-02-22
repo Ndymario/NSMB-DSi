@@ -1,0 +1,40 @@
+# NDS files / outputs
+NSNDY/
+*.nds
+*.sav
+baks/
+melonDS.ini
+melonds_sd_4gb.img
+melonds_sd_4gb.img.idx
+
+# Patch outputs
+*.xdelta
+
+# NCPatcher artifacts
+ncp_ide.h
+ncp.h
+ncpatcher
+ncprt.c
+log.txt
+convert_sdk.py
+build/
+backup/
+
+# NitroSDK extraction artifacts
+nitro/
+nitro_wl/
+nnsys/
+nitro.h
+nnsys.h
+nitro_sp.h
+nitro_win32.h
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+
+# Legacy local files
+A01_1.bak.bin
+ONSMB.ml1
