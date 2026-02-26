@@ -10,6 +10,7 @@ namespace {
 constexpr uintptr_t kScfgA9RomAddr = 0x04004000;
 constexpr uintptr_t kScfgExt9Addr = 0x04004008;
 constexpr uintptr_t kSndExCntAddr = 0x04004700;
+constexpr uint32_t kArchiveFileIdBase = 131;
 
 constexpr uintptr_t kBaseSpawnAddr = 0x0204c9a4;
 constexpr uintptr_t kFsConvertPathToFileIdAddr = 0x0206a54c;
@@ -17,7 +18,11 @@ constexpr uintptr_t kFsInitFileAddr = 0x0206a778;
 constexpr uintptr_t kFsOpenFileFastAddr = 0x0206a478;
 constexpr uintptr_t kFsReadFileAddr = 0x0206a2f0;
 constexpr uintptr_t kFsCloseFileAddr = 0x0206a3e0;
+constexpr uintptr_t kFsLoadExtFileToDestAddr = 0x020088fc;
+constexpr uintptr_t kFsCacheSetup3DFileAddr = 0x02009DEC;
+constexpr uintptr_t kDcStoreRangeAddr = 0x02065ccc;
 constexpr uintptr_t kDcFlushRangeAddr = 0x02065ce8;
+constexpr uintptr_t kDcWaitWriteBufferEmptyAddr = 0x02065d0c;
 constexpr uintptr_t kIcInvalidateRangeAddr = 0x02065d24;
 constexpr uintptr_t kOsEnableProtectionUnitAddr = 0x02066230;
 constexpr uintptr_t kOsSetProtectionRegion1Addr = 0x02066250;
@@ -31,6 +36,8 @@ constexpr uintptr_t kExtraRamPoolStrictEndAddr = 0x02ffffff;
 constexpr uint32_t kExtraRamPoolStrictSize = kExtraRamPoolStrictEndAddr - kExtraRamPoolStrictBaseAddr + 1;
 constexpr uint32_t kExtraRamProbePattern = 0x44534921;  // "DSI!"
 constexpr uint16_t kScfgA9RomDsiMode = 0x0001;
+constexpr uint32_t kMagicNsbtx = 0x30585442;  // "BTX0"
+constexpr uint32_t kMagicNsbmd = 0x30444D42;  // "BMD0"
 
 // Ghidra: OS_InitArenaEx writes 0x0200002B to region1 (4MB). 16MB is size-field +2.
 constexpr uint32_t kMpuMainRamRegion4Mb = 0x0200002b;
@@ -44,12 +51,16 @@ static_assert(kExtraRamPoolStrictBaseAddr > kOverlayGuardBaseAddr,
 constexpr uint32_t kOverlayMaxImageSize = kOverlayImageEndAddr - kOverlayImageBaseAddr + 1;
 constexpr uint32_t kOverlayTotalRegionSize = kOverlayGuardBaseAddr - kOverlayImageBaseAddr;
 constexpr uint32_t kOverlayMaxBssSize = kOverlayTotalRegionSize - kOverlayMaxImageSize;
+constexpr uint32_t kDsiPromoteMinSize = 0x2000;  // 8KB
 
 constexpr uint16_t kCustomObjectMin = 0x0300;
 constexpr uint16_t kCustomObjectMax = 0x03ff;
-constexpr char kOverlayPath[] = "/z_new/mod/modovl.bin";
+constexpr const char* kOverlayPaths[] = {
+    "/z_new/mod/ordinaryovl.bin",
+    "/z_new/mod/modovl.bin",
+};
 
-struct FSFileID {
+struct RuntimeFSFileID {
     void *archive;
     uint32_t file_id;
 };
@@ -61,12 +72,16 @@ struct FSFile {
 
 using BaseSpawnFn = void *(*)(uint16_t object_id, void *parent_node, uint32_t settings,
                               uint8_t base_type);
-using FSConvertPathToFileIDFn = int (*)(FSFileID *id, char *path);
+using FSConvertPathToFileIDFn = int (*)(RuntimeFSFileID *id, char *path);
 using FSInitFileFn = void (*)(FSFile *file);
 using FSOpenFileFastFn = int (*)(FSFile *file, int archive, uint32_t file_id);
 using FSReadFileFn = int (*)(FSFile *file, void *dest, uint32_t size);
 using FSCloseFileFn = int (*)(FSFile *file);
+using FSLoadExtFileToDestFn = int (*)(uint32_t ext_file_id, void *dest, int size);
+using FSCacheSetup3DFileFn = bool (*)(void *file, bool unload_textures);
+using DCStoreRangeFn = void (*)(const void *start, int size);
 using DCFlushRangeFn = void (*)(void *start, int size);
+using DCWaitWriteBufferEmptyFn = void (*)();
 using ICInvalidateRangeFn = void (*)(void *start, int size);
 using OSEnableProtectionUnitFn = uint32_t (*)();
 using OSSetProtectionRegion1Fn = void (*)(uint32_t);
@@ -78,7 +93,14 @@ FSInitFileFn FSInitFile = reinterpret_cast<FSInitFileFn>(kFsInitFileAddr);
 FSOpenFileFastFn FSOpenFileFast = reinterpret_cast<FSOpenFileFastFn>(kFsOpenFileFastAddr);
 FSReadFileFn FSReadFile = reinterpret_cast<FSReadFileFn>(kFsReadFileAddr);
 FSCloseFileFn FSCloseFile = reinterpret_cast<FSCloseFileFn>(kFsCloseFileAddr);
+FSLoadExtFileToDestFn FSLoadExtFileToDest =
+    reinterpret_cast<FSLoadExtFileToDestFn>(kFsLoadExtFileToDestAddr);
+FSCacheSetup3DFileFn FSCacheSetup3DFile =
+    reinterpret_cast<FSCacheSetup3DFileFn>(kFsCacheSetup3DFileAddr);
+DCStoreRangeFn DCStoreRange = reinterpret_cast<DCStoreRangeFn>(kDcStoreRangeAddr);
 DCFlushRangeFn DCFlushRange = reinterpret_cast<DCFlushRangeFn>(kDcFlushRangeAddr);
+DCWaitWriteBufferEmptyFn DCWaitWriteBufferEmpty =
+    reinterpret_cast<DCWaitWriteBufferEmptyFn>(kDcWaitWriteBufferEmptyAddr);
 ICInvalidateRangeFn ICInvalidateRange =
     reinterpret_cast<ICInvalidateRangeFn>(kIcInvalidateRangeAddr);
 OSEnableProtectionUnitFn OSEnableProtectionUnit =
@@ -93,9 +115,23 @@ bool g_bootstrap_finished = false;
 bool g_spawn_in_progress = false;
 bool g_logged_detect_result = false;
 bool g_extra_ram_pool_ready = false;
+bool g_extra_ram_reset_pending = false;
 uint32_t g_extra_ram_pool_cursor = 0;
+uint32_t g_extra_ram_generation = 1;
 uintptr_t g_extra_ram_pool_base_addr = kExtraRamPoolStrictBaseAddr;
 uint32_t g_extra_ram_pool_size = kExtraRamPoolStrictSize;
+
+struct PromotedFileEntry {
+    uint32_t ext_file_id;
+    uint32_t magic;
+    uint32_t size;
+    void *data;
+};
+
+constexpr uint32_t kMaxPromotedFiles = 64;
+PromotedFileEntry g_promoted_files[kMaxPromotedFiles] = {};
+uint32_t g_promoted_file_slots_used = 0;
+
 ModOverlayExports *g_overlay_exports = nullptr;
 ModOverlayHostApi g_host_api = {};
 constexpr uint32_t kDetectOk = 0;
@@ -186,6 +222,14 @@ void ZeroBytes(uint8_t *dest, uint32_t size) {
     FillBytes(dest, 0, size);
 }
 
+void CopyBytes(void *dest, const void *src, uint32_t size) {
+    auto *dst = reinterpret_cast<uint8_t *>(dest);
+    auto *source = reinterpret_cast<const uint8_t *>(src);
+    for (uint32_t i = 0; i < size; ++i) {
+        dst[i] = source[i];
+    }
+}
+
 uint32_t ComputeCrc32(const void *data, uint32_t size) {
     uint32_t crc = 0xffffffffu;
     const uint8_t *bytes = reinterpret_cast<const uint8_t *>(data);
@@ -207,9 +251,150 @@ uint32_t AlignUp(uint32_t value, uint32_t alignment) {
     return (value + mask) & ~mask;
 }
 
+bool HasExpectedMagic(const void *file, uint32_t expected_magic) {
+    return file != nullptr && (*reinterpret_cast<const uint32_t *>(file) == expected_magic);
+}
+
+bool Is3DResourceMagic(uint32_t magic) {
+    return magic == kMagicNsbtx || magic == kMagicNsbmd;
+}
+
+uint32_t ReadFileMagic(const void *file) {
+    return (file == nullptr) ? 0u : *reinterpret_cast<const uint32_t *>(file);
+}
+
+void BumpExtraRamGeneration() {
+    g_extra_ram_generation++;
+    if (g_extra_ram_generation == 0u) {
+        g_extra_ram_generation = 1u;
+    }
+}
+
+void ResetPromotedFiles() {
+    g_promoted_file_slots_used = 0;
+    for (uint32_t i = 0; i < kMaxPromotedFiles; ++i) {
+        g_promoted_files[i].ext_file_id = 0xffffffffu;
+        g_promoted_files[i].magic = 0;
+        g_promoted_files[i].size = 0;
+        g_promoted_files[i].data = nullptr;
+    }
+}
+
+PromotedFileEntry *FindPromotedEntry(uint32_t ext_file_id) {
+    for (uint32_t i = 0; i < kMaxPromotedFiles; ++i) {
+        PromotedFileEntry &entry = g_promoted_files[i];
+        if (entry.data == nullptr) {
+            continue;
+        }
+        if (entry.ext_file_id == ext_file_id) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+const PromotedFileEntry *FindPromotedEntryConst(uint32_t ext_file_id) {
+    for (uint32_t i = 0; i < kMaxPromotedFiles; ++i) {
+        const PromotedFileEntry &entry = g_promoted_files[i];
+        if (entry.data == nullptr) {
+            continue;
+        }
+        if (entry.ext_file_id == ext_file_id) {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+void *FindPromotedFile(uint32_t ext_file_id, uint32_t expected_magic) {
+    const PromotedFileEntry *entry = FindPromotedEntryConst(ext_file_id);
+    if (entry == nullptr) {
+        return nullptr;
+    }
+    return HasExpectedMagic(entry->data, expected_magic) ? entry->data : nullptr;
+}
+
+void RememberPromotedFile(uint32_t ext_file_id, void *data, uint32_t size) {
+    if (data == nullptr) {
+        return;
+    }
+
+    const uint32_t magic = ReadFileMagic(data);
+    uint32_t free_slot = 0xffffffffu;
+    for (uint32_t i = 0; i < kMaxPromotedFiles; ++i) {
+        PromotedFileEntry &entry = g_promoted_files[i];
+        if (entry.data == nullptr && free_slot == 0xffffffffu) {
+            free_slot = i;
+            continue;
+        }
+        if (entry.ext_file_id == ext_file_id) {
+            entry.magic = magic;
+            entry.size = size;
+            entry.data = data;
+            return;
+        }
+    }
+
+    if (free_slot == 0xffffffffu) {
+        return;
+    }
+
+    g_promoted_files[free_slot].ext_file_id = ext_file_id;
+    g_promoted_files[free_slot].magic = magic;
+    g_promoted_files[free_slot].size = size;
+    g_promoted_files[free_slot].data = data;
+    if (g_promoted_file_slots_used < kMaxPromotedFiles) {
+        g_promoted_file_slots_used++;
+    }
+}
+
+bool ShouldPromoteForPolicy(ModRuntimeDsiFilePolicy policy, uint32_t size) {
+    switch (policy) {
+        case ModRuntimeDsiFilePolicy::PROMOTE_ALWAYS:
+            return size != 0u;
+        case ModRuntimeDsiFilePolicy::PROMOTE_IF_LARGE:
+            return size >= kDsiPromoteMinSize;
+        default:
+            return false;
+    }
+}
+
+bool ReadExtFileToBuffer(uint32_t ext_file_id, void *dest, uint32_t size) {
+    if (dest == nullptr || size == 0u) {
+        return false;
+    }
+    const int read = FSLoadExtFileToDest(ext_file_id, dest, static_cast<int>(size));
+    return read == static_cast<int>(size);
+}
+
+bool FinalizePromotedFile(void *data, uint32_t size) {
+    if (data == nullptr || size == 0u) {
+        return false;
+    }
+
+    DCStoreRange(data, static_cast<int>(size));
+    DCWaitWriteBufferEmpty();
+
+    const uint32_t magic = ReadFileMagic(data);
+    if (!Is3DResourceMagic(magic)) {
+        return true;
+    }
+
+    if (!FSCacheSetup3DFile(data, false)) {
+        return false;
+    }
+
+    DCStoreRange(data, static_cast<int>(size));
+    DCWaitWriteBufferEmpty();
+    return true;
+}
+
 void ResetExtraRamPoolState() {
     g_extra_ram_pool_ready = false;
+    g_extra_ram_reset_pending = false;
     g_extra_ram_pool_cursor = 0;
+    g_extra_ram_generation = 1u;
+    ResetPromotedFiles();
     g_debug_state.extram_pool_base = static_cast<uint32_t>(g_extra_ram_pool_base_addr);
     g_debug_state.extram_pool_size = g_extra_ram_pool_size;
     g_debug_state.extram_pool_cursor = 0;
@@ -363,8 +548,15 @@ bool DetectAndEnableDsiExtraRam() {
 }
 
 bool LoadOverlayImage(uint32_t *out_bytes_read) {
-    FSFileID file_id = {};
-    if (FSConvertPathToFileID(&file_id, const_cast<char *>(kOverlayPath)) == 0) {
+    RuntimeFSFileID file_id = {};
+    bool found = false;
+    for (const char* path : kOverlayPaths) {
+        if (FSConvertPathToFileID(&file_id, const_cast<char*>(path)) != 0) {
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
         return false;
     }
 
@@ -479,6 +671,7 @@ bool TryLoadAndStartOverlay() {
 
     const uint32_t total_size = header->image_size + header->bss_size;
     DCFlushRange(kOverlayImageBase, static_cast<int>(total_size));
+    DCWaitWriteBufferEmpty();
     ICInvalidateRange(kOverlayImageBase, static_cast<int>(header->image_size));
 
     uintptr_t entry_addr = kOverlayImageBaseAddr + (header->entry_offset & ~1u);
@@ -501,6 +694,18 @@ bool TryLoadAndStartOverlay() {
 
     g_debug_state.overlay_load_successes++;
     return true;
+}
+
+void NotifyOverlaySceneChange(uint16_t scene_id) {
+    g_debug_state.scene_change_calls++;
+    g_debug_state.last_scene_change_id = scene_id;
+
+    if (g_overlay_exports == nullptr || g_overlay_exports->on_scene_change == nullptr) {
+        return;
+    }
+
+    g_debug_state.overlay_scene_callbacks++;
+    g_overlay_exports->on_scene_change(scene_id);
 }
 
 }  // namespace
@@ -566,9 +771,196 @@ void *ModRuntime_ExtraRamAlloc(uint32_t size, uint32_t alignment) {
     return ptr;
 }
 
+bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_data, uint32_t source_size,
+                                     ModRuntimeDsiFileLoadResult *out_result) {
+    if (out_result == nullptr) {
+        return false;
+    }
+    out_result->data = nullptr;
+    out_result->size = 0;
+    out_result->magic = 0;
+    out_result->reused = false;
+
+    if (!g_extra_ram_pool_ready || source_data == nullptr || source_size == 0u) {
+        return false;
+    }
+
+    if (PromotedFileEntry *cached = FindPromotedEntry(ext_file_id)) {
+        out_result->data = cached->data;
+        out_result->size = cached->size;
+        out_result->magic = cached->magic;
+        out_result->reused = true;
+        return true;
+    }
+
+    void *promoted = ModRuntime_ExtraRamAlloc(source_size, 32);
+    if (promoted == nullptr) {
+        return false;
+    }
+
+    CopyBytes(promoted, source_data, source_size);
+    if (!FinalizePromotedFile(promoted, source_size)) {
+        return false;
+    }
+
+    RememberPromotedFile(ext_file_id, promoted, source_size);
+    out_result->data = promoted;
+    out_result->size = source_size;
+    out_result->magic = ReadFileMagic(promoted);
+    return true;
+}
+
+bool ModRuntime_TryLoadFileToExtraRam(uint32_t ext_file_id, ModRuntimeDsiFilePolicy policy,
+                                      ModRuntimeDsiFileLoadResult *out_result) {
+    if (out_result == nullptr) {
+        return false;
+    }
+    out_result->data = nullptr;
+    out_result->size = 0;
+    out_result->magic = 0;
+    out_result->reused = false;
+
+    if (!g_extra_ram_pool_ready) {
+        return false;
+    }
+
+    const uint32_t file_size = FS::getFileSize(ext_file_id);
+    if (!ShouldPromoteForPolicy(policy, file_size)) {
+        return false;
+    }
+
+    if (PromotedFileEntry *cached = FindPromotedEntry(ext_file_id)) {
+        out_result->data = cached->data;
+        out_result->size = cached->size;
+        out_result->magic = cached->magic;
+        out_result->reused = true;
+        return true;
+    }
+
+    void *promoted = ModRuntime_ExtraRamAlloc(file_size, 32);
+    if (promoted == nullptr) {
+        return false;
+    }
+    if (!ReadExtFileToBuffer(ext_file_id, promoted, file_size)) {
+        return false;
+    }
+    if (!FinalizePromotedFile(promoted, file_size)) {
+        return false;
+    }
+
+    RememberPromotedFile(ext_file_id, promoted, file_size);
+    out_result->data = promoted;
+    out_result->size = file_size;
+    out_result->magic = ReadFileMagic(promoted);
+    return true;
+}
+
+bool ModRuntime_LoadValidatedFile(const char *path, uint32_t expected_magic, uint32_t *out_ext_file_id,
+                                  void **out_file) {
+    if (path == nullptr || out_ext_file_id == nullptr || out_file == nullptr) {
+        return false;
+    }
+
+    *out_ext_file_id = 0;
+    *out_file = nullptr;
+
+    RuntimeFSFileID file_id = {};
+    if (FSConvertPathToFileID(&file_id, const_cast<char *>(path)) == 0) {
+        return false;
+    }
+
+    const uint32_t candidates[2] = {
+        (file_id.file_id >= kArchiveFileIdBase) ? (file_id.file_id - kArchiveFileIdBase) : 0xffffffffu,
+        file_id.file_id,
+    };
+
+    for (uint32_t i = 0; i < 2; ++i) {
+        const uint32_t ext_file_id = candidates[i];
+        if (ext_file_id == 0xffffffffu) {
+            continue;
+        }
+
+        if (g_extra_ram_pool_ready) {
+            void *cached_promoted = FindPromotedFile(ext_file_id, expected_magic);
+            if (cached_promoted != nullptr) {
+                *out_ext_file_id = ext_file_id;
+                *out_file = cached_promoted;
+                return true;
+            }
+        }
+
+        void *cached_file = FS::Cache::loadFile(ext_file_id, false);
+        if (!HasExpectedMagic(cached_file, expected_magic)) {
+            continue;
+        }
+
+        void *file = cached_file;
+        if (g_extra_ram_pool_ready) {
+            const uint32_t file_size = FS::getFileSize(ext_file_id);
+            ModRuntimeDsiFileLoadResult promoted = {};
+            if (file_size != 0u &&
+                ModRuntime_TryPromoteLoadedFile(ext_file_id, cached_file, file_size, &promoted)) {
+                if (HasExpectedMagic(promoted.data, expected_magic)) {
+                    FS::Cache::unloadFile(ext_file_id);
+                    file = promoted.data;
+                } else {
+                    Log() << "[MODRUNTIME][FS] promoted magic mismatch extFileId=" << ext_file_id
+                          << " expected=" << Log::Hex << expected_magic
+                          << " got=" << promoted.magic << Log::Dec << "\n";
+                }
+            }
+        }
+
+        if (!HasExpectedMagic(file, expected_magic)) {
+            continue;
+        }
+
+        *out_ext_file_id = ext_file_id;
+        *out_file = file;
+        return true;
+    }
+
+    return false;
+}
+
 void ModRuntime_ExtraRamReset() {
     g_extra_ram_pool_cursor = 0;
+    g_extra_ram_reset_pending = false;
+    ResetPromotedFiles();
     g_debug_state.extram_pool_cursor = 0;
+    BumpExtraRamGeneration();
+}
+
+uint32_t ModRuntime_GetExtraRamGeneration() {
+    return g_extra_ram_generation;
+}
+
+uint32_t ModRuntime_GetPromotedFileCount() {
+    return g_promoted_file_slots_used;
+}
+
+void ModRuntime_NotifySceneChange(uint16_t scene_id) {
+    // Area-switch hooks can fire while old area assets are still live.
+    // Defer reset until an explicit safe boundary (area enter / overlay unload).
+    if (scene_id == kModRuntimeSceneEventSwitchArea ||
+        scene_id == kModRuntimeSceneEventAreaLeave) {
+        if (!g_extra_ram_reset_pending) {
+            Log() << "[DSI-MEM][LIFECYCLE] deferred reset pending scene="
+                  << Log::Hex << scene_id << Log::Dec << "\n";
+        }
+        g_extra_ram_reset_pending = true;
+    }
+
+    const bool safe_reset_boundary =
+        scene_id == kModRuntimeSceneEventAreaEnter ||
+        scene_id == kModRuntimeSceneEventOverlayUnload;
+    if (safe_reset_boundary && g_extra_ram_pool_ready &&
+        (g_extra_ram_reset_pending || scene_id == kModRuntimeSceneEventOverlayUnload)) {
+        Log() << "[DSI-MEM][LIFECYCLE] applying deferred reset scene="
+              << Log::Hex << scene_id << Log::Dec << "\n";
+        ModRuntime_ExtraRamReset();
+    }
+    NotifyOverlaySceneChange(scene_id);
 }
 
 ModRuntimeMode ModRuntime_GetMode() {

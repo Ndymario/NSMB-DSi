@@ -3,7 +3,6 @@
 NSMB code-mod project with:
 - baseline NTR-safe behavior
 - runtime-gated DSi enhancements
-- melonDS direct-boot DSi bring-up path (no nds-bootstrap/TWiLight dependency)
 
 ## Runtime hooks
 
@@ -60,6 +59,47 @@ Generate a minimal payload (used for overlay runtime validation):
 ```bash
 python3 ./tools/generate_test_overlay_payload.py --out ./build/mod_overlay_payload.bin --exports-offset 0x20
 ```
+
+## Ordinary overlay payload
+
+`ordinary_overlay` is an adapted overlay module based on [An Ordinary NSMB Mod](https://github.com/Ndymario/Ordinary-NSMB-Mod)
+
+Build + pack ordinary overlay and rebuild ROM:
+
+```bash
+./tools/build_with_ordinary_overlay.sh
+```
+
+This produces:
+- `nitrofs/z_new/mod/ordinaryovl.bin`
+- `nitrofs/z_new/mod/modovl.bin` (compat mirror for current runtime path)
+
+Current translated custom IDs:
+- `0x0300`: SpookyController entry (translated overlay-side controller trigger)
+- `0x0301`: Spooky Chaser path
+- `0x0302`: Spooky boss block projectile path
+
+## Ordinary NitroFS sync
+
+Ordinary NitroFS assets are copied into this repo under:
+- `nitrofs/banner.bin`
+- `nitrofs/course/H12_1.bin`
+- `nitrofs/course/H12_1_bgdat.bin`
+- `nitrofs/course/H12_3.bin`
+- `nitrofs/course/H12_3_bgdat.bin`
+- `nitrofs/z_new/Ordinary/actors/*`
+- `nitrofs/z_new/dummy.txt`
+
+## Ordinary gameplay source port
+
+To support spooky controller and boss behavior, these Ordinary code modules are copied into this repo and built by NCPatcher:
+- `source/ports/Ordinary/SpookyController.cpp`
+- `source/ports/Ordinary/SpookyChaser.cpp`
+- `source/ports/Ordinary/SpookyBoss/SpookyBoss.cpp`
+- `source/ports/Ordinary/SpookyBoss/BlockProjectile.cpp`
+- `source/NSBTX.cpp`
+- `source/lighting/extralighting.cpp`
+- `source/ports/Ordinary/util/collisionviewer.cpp`
 
 ## melonDS run
 

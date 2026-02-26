@@ -10,6 +10,8 @@ bool g_logged_boot_hook = false;
 //   0x02186AA0 (overlay 1 -> in-game 0x020CC720)
 //   0x02186E50 (overlay 1 -> in-game 0x020CCAD0)
 void BootScene_SwitchSceneWarningHook() {
+    ModRuntime_NotifySceneChange(kModRuntimeSceneEventBootSceneSwitch);
+
     if (!g_logged_boot_hook) {
         g_logged_boot_hook = true;
         Log() << "[MODRUNTIME][BOOTSCENE] switchScene callsite reached mode="

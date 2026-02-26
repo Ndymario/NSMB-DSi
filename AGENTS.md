@@ -828,6 +828,66 @@ Consult GBATEK for:
 
 ---
 
+------------------------------------------------------------------------
+
+NITRO Developer Documentation (NitroSDK / Official APIs)
+
+Agents have access to the official NITRO Developer Documentation
+locally:
+
+/Users/ndymario/NSMB-DS-Modding/NitroDevDocs
+
+These PDF manuals document the original Nintendo DS SDK (NitroSDK),
+including:
+
+-   OS (threads, memory arenas, interrupts, alarms)
+-   GX / 2D / 3D graphics APIs
+-   File system (FS)
+-   NARC / archive handling
+-   Audio (SND / SDAT)
+-   Input handling
+-   System initialization
+-   ARM9 ↔ ARM7 communication
+-   Memory arena configuration
+-   Cache behavior and DMA usage
+
+This documentation reflects how Nintendo intended DS software to
+interact with hardware and system services.
+
+When reverse engineering or extending NSMB, these documents provide the
+semantic meaning behind many SDK-style functions visible in Ghidra.
+
+------------------------------------------------------------------------
+
+When to Use Nitro Developer Documentation
+
+Consult Nitro Developer Documentation when:
+
+-   Identifying SDK functions in Ghidra
+-   Investigating OS_* functions (threads, alarms, timers)
+-   Understanding memory arena setup (OS_GetArenaLo/Hi)
+-   Interpreting GX / G2 / G3 calls
+-   Understanding heap behavior and allocation flow
+-   Investigating archive loading logic
+-   Researching VBlank / HBlank scheduling behavior
+-   Modifying system initialization behavior
+
+If a function appears to be part of the SDK, verify its purpose in Nitro
+docs before modifying or hooking it.
+
+------------------------------------------------------------------------
+
+Relationship to Other References
+
+Use references in this order:
+
+1.  Ghidra → What NSMB is calling
+2.  Nitro Developer Docs → What the SDK layer guarantees
+3.  GBATEK → What the hardware actually does
+
+Do not rely purely on symbol names or assumptions.
+------------------------------------------------------------------------
+
 ## TODO (Future Expansion)
 - Region-specific address handling
 - Common hook templates

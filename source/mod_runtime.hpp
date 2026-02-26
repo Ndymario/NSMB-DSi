@@ -11,6 +11,18 @@ enum class ModRuntimeMode : uint32_t {
     DSI_MODE_OVERLAY_READY = 3,
 };
 
+enum class ModRuntimeDsiFilePolicy : uint32_t {
+    PROMOTE_ALWAYS = 0,
+    PROMOTE_IF_LARGE = 1,
+};
+
+struct ModRuntimeDsiFileLoadResult {
+    void *data;
+    uint32_t size;
+    uint32_t magic;
+    bool reused;
+};
+
 struct ModRuntimeDebugState {
     uint32_t bootstrap_calls;
     uint32_t bootstrap_seen;
@@ -79,9 +91,13 @@ struct ModRuntimeDebugState {
 
     uint16_t last_object_id;
     uint16_t last_custom_object_id;
+    uint16_t last_scene_change_id;
+    uint16_t scene_change_reserved;
     uint32_t last_settings;
     uint8_t last_base_type;
     uint8_t reserved[3];
+    uint32_t scene_change_calls;
+    uint32_t overlay_scene_callbacks;
 
     ModRuntimeMode last_mode_snapshot;
 };
@@ -92,12 +108,27 @@ bool ModRuntime_IsDsiCompatModeLikely();
 bool ModRuntime_IsCompatUnlockEnabled();
 bool ModRuntime_IsExtraRamPoolReady();
 void *ModRuntime_ExtraRamAlloc(uint32_t size, uint32_t alignment = 32);
+bool ModRuntime_TryLoadFileToExtraRam(uint32_t ext_file_id, ModRuntimeDsiFilePolicy policy,
+                                      ModRuntimeDsiFileLoadResult *out_result);
+bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_data, uint32_t source_size,
+                                     ModRuntimeDsiFileLoadResult *out_result);
+bool ModRuntime_LoadValidatedFile(const char *path, uint32_t expected_magic, uint32_t *out_ext_file_id,
+                                  void **out_file);
 void ModRuntime_ExtraRamReset();
+uint32_t ModRuntime_GetExtraRamGeneration();
+uint32_t ModRuntime_GetPromotedFileCount();
+void ModRuntime_NotifySceneChange(uint16_t scene_id);
 ModRuntimeMode ModRuntime_GetMode();
 const ModRuntimeDebugState *ModRuntime_GetDebugState();
 const char *ModRuntime_GetDetectReasonLabel(uint32_t code);
 const char *ModRuntime_GetOverlaySkipReasonLabel(uint32_t code);
 bool ModRuntime_TryLateCompatEnable();
+
+constexpr uint16_t kModRuntimeSceneEventSwitchArea = 0xfffe;
+constexpr uint16_t kModRuntimeSceneEventBootSceneSwitch = 0xfffd;
+constexpr uint16_t kModRuntimeSceneEventAreaEnter = 0xfffc;
+constexpr uint16_t kModRuntimeSceneEventAreaLeave = 0xfffb;
+constexpr uint16_t kModRuntimeSceneEventOverlayUnload = 0xfffa;
 
 template <typename TDsi, typename TNds>
 inline auto ModRuntime_IfDsi(TDsi dsi_value, TNds nds_value) -> decltype(dsi_value) {
