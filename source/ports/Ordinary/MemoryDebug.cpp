@@ -27,11 +27,14 @@ u32 ToRealFileId(u32 ext_file_id) {
 bool ShouldKeepOnMainHeap(u32 ext_file_id) {
     const u32 real_file_id = ToRealFileId(ext_file_id);
 
-    // Some particle SPA archives are not safe to bounce through the DSi pool on reload.
-    // realID 1861 (particle/spl_b01_kpa.spa) now reproduces the same second-entry crash
-    // pattern that realID 1870 (particle/spl_coursesel.spa) already had.
-    // Keep these on the original heap until their consumer lifetime is understood.
-    return real_file_id == 1861u || real_file_id == 1870u;
+    // The particle/spl*.spa family is not safe to bounce through the DSi pool across
+    // scene transitions and reloads. We observed crashes with:
+    // - 1860: particle/spl.spa
+    // - 1861: particle/spl_b01_kpa.spa
+    // - 1870: particle/spl_coursesel.spa
+    // Keep the full contiguous SPA block on the original heap until the consumer
+    // lifetime / ownership path is understood.
+    return real_file_id >= 1859u && real_file_id <= 1871u;
 }
 
 void LogDsiPoolState(const char *tag) {
