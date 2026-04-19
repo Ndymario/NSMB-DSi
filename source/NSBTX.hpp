@@ -3,6 +3,8 @@
 #include "nsmb/core/math/vector.hpp"
 #include "nsmb/core/graphics/3d/texture.hpp"
 
+bool PrepareStandaloneNsbtx(void* file);
+
 class NSBTX
 {
 public:

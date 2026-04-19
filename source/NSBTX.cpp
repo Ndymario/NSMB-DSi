@@ -2,6 +2,23 @@
 
 #include "nsmb/game/game.hpp"
 
+namespace {
+
+using NNSG3dResDefaultSetupFn = BOOL (*)(void *pResData);
+static NNSG3dResDefaultSetupFn NNSG3dResDefaultSetupOriginal =
+    reinterpret_cast<NNSG3dResDefaultSetupFn>(0x02059b68);
+
+} // namespace
+
+bool PrepareStandaloneNsbtx(void* file)
+{
+	if (file == nullptr) {
+		return false;
+	}
+
+	return NNSG3dResDefaultSetupOriginal(file) != FALSE;
+}
+
 void NSBTX::setup(void* file, const Vec2& size, const Vec2& center, int texID, int palID)
 {
 	this->size = size;

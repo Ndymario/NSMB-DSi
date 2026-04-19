@@ -59,6 +59,9 @@ void SpookyController::onPrepareResources() {
 	}
 
 	Log() << "[ORDINARY][SpookyController] Loaded static texture extFileId=" << extFileId << "\n";
+	if (!PrepareStandaloneNsbtx(nsbtxFile)) {
+		Log() << "[ORDINARY][SpookyController] Failed to setup static texture resource.\n";
+	}
 	staticNsbtx.setup(nsbtxFile, Vec2(64, 64), Vec2(0, 0), 0, 0);
 	staticTexGeneration = generation;
 	staticTexReady = true;
@@ -172,6 +175,8 @@ void SpookyController::onAreaChange() {
 		chaser = nullptr;
 	}
 	hasSpawnedForBoss = false;
+	staticTexReady = false;
+	staticTexGeneration = 0;
 	onPrepareResources();
 	isRenderingStatic = false;
 	staticDuration = 0;
