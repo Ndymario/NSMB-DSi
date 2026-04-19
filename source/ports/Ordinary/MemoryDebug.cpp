@@ -6,11 +6,33 @@
 
 namespace {
 
-u32 g_loading_ext_file_id = 0;
+constexpr u32 kNoLoadingExtFileId = 0xffffffffu;
+constexpr u32 kPreloadToDsiMinSize = 0xC000u;
+constexpr u32 kPromoteAfterLoadMinSize = 0x2000u;
+constexpr uintptr_t kExtraRamPoolBaseAddr = 0x02c10000u;
+constexpr uintptr_t kExtraRamPoolEndAddr = 0x02ffffffu;
+constexpr u32 kSetup3DClearLogLimit = 8u;
+
+u32 g_loading_ext_file_id = kNoLoadingExtFileId;
 bool g_low_heap_logged = false;
+bool g_setup3d_in_progress = false;
+u32 g_setup3d_file_id = kNoLoadingExtFileId;
+void *g_setup3d_file_data = nullptr;
+u32 g_setup3d_clear_log_count = 0;
 
 u32 ToRealFileId(u32 ext_file_id) {
+    if (ext_file_id == kNoLoadingExtFileId) {
+        return 0xffffffffu;
+    }
     return (ext_file_id & 0xFFFFu) + 131u;
+}
+
+bool ShouldKeepOnMainHeap(u32 ext_file_id) {
+    const u32 real_file_id = ToRealFileId(ext_file_id);
+
+    // realID 1870 crashes on reload immediately after returning the promoted buffer.
+    // Keep it on the original heap until its consumer path is understood.
+    return real_file_id == 1870u;
 }
 
 void LogDsiPoolState(const char *tag) {
@@ -29,6 +51,47 @@ void LogDsiPoolState(const char *tag) {
           << " last_size=" << state->extram_last_alloc_size
           << " last_addr=" << Log::Hex << state->extram_last_alloc_addr << Log::Dec
           << "\n";
+}
+
+void CopyBytes(void *dest, const void *src, u32 size) {
+    auto *dst = reinterpret_cast<u8 *>(dest);
+    auto *source = reinterpret_cast<const u8 *>(src);
+    for (u32 i = 0; i < size; ++i) {
+        dst[i] = source[i];
+    }
+}
+
+void *LoadRawFileToExtraRam(u32 extFileID, u32 file_size) {
+    if (!ModRuntime_IsExtraRamPoolReady() || file_size == 0u) {
+        return nullptr;
+    }
+
+    void *dest = ModRuntime_ExtraRamAlloc(file_size, 32);
+    if (dest == nullptr) {
+        return nullptr;
+    }
+
+    const s32 read = FS::loadExtFile(extFileID, dest, static_cast<s32>(file_size));
+    return read == static_cast<s32>(file_size) ? dest : nullptr;
+}
+
+void *CopyRawFileToExtraRam(const void *source, u32 file_size) {
+    if (!ModRuntime_IsExtraRamPoolReady() || source == nullptr || file_size == 0u) {
+        return nullptr;
+    }
+
+    void *dest = ModRuntime_ExtraRamAlloc(file_size, 32);
+    if (dest == nullptr) {
+        return nullptr;
+    }
+
+    CopyBytes(dest, source, file_size);
+    return dest;
+}
+
+bool IsExtraRamPointer(const void *ptr) {
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    return addr >= kExtraRamPoolBaseAddr && addr <= kExtraRamPoolEndAddr;
 }
 
 }  // namespace
@@ -63,6 +126,33 @@ void *Heap_allocate_SUPER(Heap *self, u32 size, int align);
 void Heap_deallocate_SUPER(Heap *self, void *ptr);
 }
 
+using ResizeHeapFn = void *(*)(Heap *heap, void *ptr, u32 newSize);
+static ResizeHeapFn ResizeHeapOriginal = reinterpret_cast<ResizeHeapFn>(0x02044af8);
+using NNSG3dResDefaultSetupFn = BOOL (*)(void *pResData);
+static NNSG3dResDefaultSetupFn NNSG3dResDefaultSetupOriginal =
+    reinterpret_cast<NNSG3dResDefaultSetupFn>(0x02059b68);
+
+void *Setup3DFile_ResizeHeapShim(Heap *heap, void *ptr, u32 newSize) {
+    if (IsExtraRamPointer(ptr)) {
+        void *resized = ModRuntime_TryResizeExtraRamTail(ptr, newSize);
+        if (g_setup3d_in_progress && resized != nullptr) {
+            Log() << "[DSI-MEM][3D] resize-tail"
+                  << " realID=" << ToRealFileId(g_setup3d_file_id)
+                  << " file=" << Log::Hex << reinterpret_cast<uintptr_t>(g_setup3d_file_data)
+                  << " ptr=" << reinterpret_cast<uintptr_t>(ptr)
+                  << Log::Dec << " new_size=" << newSize << "\n";
+        }
+        if (resized == nullptr) {
+            Log() << "[DSI-MEM][FS] resize-tail FAILED"
+                  << " ptr=" << Log::Hex << reinterpret_cast<uintptr_t>(ptr)
+                  << " new_size=" << Log::Dec << newSize << "\n";
+            LogDsiPoolState("resize-tail-fail");
+        }
+        return resized;
+    }
+    return ResizeHeapOriginal(heap, ptr, newSize);
+}
+
 ncp_jump(0x0200A234)
 void *FS_Cache_CacheEntry_loadFile_OVERRIDE(FS::Cache::CacheEntry *self, u32 extFileID, bool compressed) {
     g_loading_ext_file_id = extFileID;
@@ -71,37 +161,84 @@ void *FS_Cache_CacheEntry_loadFile_OVERRIDE(FS::Cache::CacheEntry *self, u32 ext
     const u32 free_heap =
         (Memory::currentHeapPtr != nullptr) ? Memory::currentHeapPtr->vMaxAllocatableSize(4) : 0;
 
+    if (ModRuntime_IsExtraRamPoolReady() &&
+        !ShouldKeepOnMainHeap(extFileID) &&
+        !compressed &&
+        file_size >= kPreloadToDsiMinSize) {
+        if (void *dsi_data = LoadRawFileToExtraRam(extFileID, file_size)) {
+            self->size = file_size;
+            self->fileID = scast<u16>(extFileID & 0xFFFFu);
+            self->compressed = compressed;
+            self->data = dsi_data;
+            self->heap = nullptr;
+
+            Log() << "[DSI-MEM][FS] preload-loaded"
+                  << " realID=" << ToRealFileId(extFileID)
+                  << " size=" << file_size << " to_dsi=1\n";
+            LogDsiPoolState("preload-load");
+            g_loading_ext_file_id = kNoLoadingExtFileId;
+            return dsi_data;
+        }
+    }
+
     void *data = FS_Cache_CacheEntry_loadFile_SUPER(self, extFileID, compressed);
     if (data == nullptr) {
         Log() << "[DSI-MEM][FS] loadFile FAILED realID=" << ToRealFileId(extFileID)
               << " size=" << file_size << " free_heap=" << free_heap << "\n";
         LogDsiPoolState("fs-load-fail");
 
-        ModRuntimeDsiFileLoadResult dsi_load = {};
-        if (ModRuntime_TryLoadFileToExtraRam(extFileID, ModRuntimeDsiFilePolicy::PROMOTE_IF_LARGE,
-                                             &dsi_load)) {
-            self->size = dsi_load.size;
-            self->fileID = scast<u16>(extFileID & 0xFFFFu);
-            self->compressed = compressed;
-            self->data = dsi_load.data;
-            self->heap = nullptr;
+        if (!compressed && file_size >= kPromoteAfterLoadMinSize) {
+            if (void *dsi_data = LoadRawFileToExtraRam(extFileID, file_size)) {
+                self->size = file_size;
+                self->fileID = scast<u16>(extFileID & 0xFFFFu);
+                self->compressed = compressed;
+                self->data = dsi_data;
+                self->heap = nullptr;
 
-            Log() << "[DSI-MEM][FS] fallback-" << (dsi_load.reused ? "reused" : "loaded")
-                  << " realID=" << ToRealFileId(extFileID)
-                  << " size=" << dsi_load.size << " to_dsi=1\n";
-            LogDsiPoolState("fallback-load");
-            return dsi_load.data;
+                Log() << "[DSI-MEM][FS] fallback-loaded"
+                      << " realID=" << ToRealFileId(extFileID)
+                      << " size=" << file_size << " to_dsi=1\n";
+                LogDsiPoolState("fallback-load");
+                g_loading_ext_file_id = kNoLoadingExtFileId;
+                return dsi_data;
+            }
         }
+        g_loading_ext_file_id = kNoLoadingExtFileId;
         return nullptr;
     }
 
     const u32 loaded_size = self->size;
+    if (ModRuntime_IsExtraRamPoolReady() &&
+        !ShouldKeepOnMainHeap(extFileID) &&
+        self->heap != nullptr &&
+        !compressed &&
+        self->data != nullptr &&
+        loaded_size >= kPromoteAfterLoadMinSize) {
+        if (void *promoted_data = CopyRawFileToExtraRam(self->data, loaded_size)) {
+            Heap *const original_heap = self->heap;
+            void *const original_data = self->data;
+
+            self->data = promoted_data;
+            self->size = loaded_size;
+            self->heap = nullptr;
+            data = promoted_data;
+
+            original_heap->deallocate(original_data);
+
+            Log() << "[DSI-MEM][FS] promote-loaded"
+                  << " realID=" << ToRealFileId(extFileID)
+                  << " size=" << loaded_size << " to_dsi=1\n";
+            LogDsiPoolState("promote-load");
+        }
+    }
+
     const u32 free_heap_after =
         (Memory::currentHeapPtr != nullptr) ? Memory::currentHeapPtr->vMaxAllocatableSize(4) : 0;
 
     Log() << "[DSI-MEM][FS] loadFile realID=" << ToRealFileId(extFileID)
           << " loaded_size=" << loaded_size
           << " free_heap_now=" << free_heap_after << "\n";
+    g_loading_ext_file_id = kNoLoadingExtFileId;
     return data;
 }
 
@@ -119,13 +256,59 @@ void *FS_Cache_CacheEntry_loadFileToOverlay_OVERRIDE(FS::Cache::CacheEntry *self
               << " req_size=" << required_size
               << " overlay_free=" << FS::Cache::overlayFileSize << "\n";
         LogDsiPoolState("overlay-load-fail");
+        g_loading_ext_file_id = kNoLoadingExtFileId;
         return nullptr;
     }
 
     Log() << "[DSI-MEM][FS] loadFileToOverlay realID=" << ToRealFileId(extFileID)
           << " req_size=" << required_size
           << " overlay_free_now=" << FS::Cache::overlayFileSize << "\n";
+    g_loading_ext_file_id = kNoLoadingExtFileId;
     return data;
+}
+
+ncp_call(0x02009E1C)
+BOOL Setup3DFile_NNSG3dResDefaultSetup_Hook(void *pResData) {
+    g_setup3d_in_progress = true;
+    g_setup3d_file_id = g_loading_ext_file_id;
+    g_setup3d_file_data = pResData;
+    g_setup3d_clear_log_count = 0;
+
+    Log() << "[DSI-MEM][3D] setup start"
+          << " realID=" << ToRealFileId(g_setup3d_file_id)
+          << " data=" << Log::Hex << reinterpret_cast<uintptr_t>(pResData)
+          << Log::Dec << "\n";
+
+    const BOOL result = NNSG3dResDefaultSetupOriginal(pResData);
+
+    Log() << "[DSI-MEM][3D] setup done"
+          << " realID=" << ToRealFileId(g_setup3d_file_id)
+          << " result=" << static_cast<u32>(result) << "\n";
+
+    g_setup3d_in_progress = false;
+    g_setup3d_file_id = kNoLoadingExtFileId;
+    g_setup3d_file_data = nullptr;
+    g_setup3d_clear_log_count = 0;
+    return result;
+}
+
+ncp_call(0x02009E60)
+void *Setup3DFile_ResizeHeapShim_Hook(Heap *heap, void *ptr, u32 newSize) {
+    return Setup3DFile_ResizeHeapShim(heap, ptr, newSize);
+}
+
+ncp_hook(0x02066e98)
+void MIi_CpuClear32_Hook(u32 data, void *dest, u32 size) {
+    if (!g_setup3d_in_progress || g_setup3d_clear_log_count >= kSetup3DClearLogLimit) {
+        return;
+    }
+
+    g_setup3d_clear_log_count++;
+    Log() << "[DSI-MEM][3D] clear32"
+          << " realID=" << ToRealFileId(g_setup3d_file_id)
+          << " fill=" << Log::Hex << data
+          << " dest=" << reinterpret_cast<uintptr_t>(dest)
+          << Log::Dec << " size=" << size << "\n";
 }
 
 ncp_repl(0x020450D4, "NOP")

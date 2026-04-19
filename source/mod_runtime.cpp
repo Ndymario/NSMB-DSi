@@ -19,7 +19,12 @@ constexpr uintptr_t kFsOpenFileFastAddr = 0x0206a478;
 constexpr uintptr_t kFsReadFileAddr = 0x0206a2f0;
 constexpr uintptr_t kFsCloseFileAddr = 0x0206a3e0;
 constexpr uintptr_t kFsLoadExtFileToDestAddr = 0x020088fc;
+constexpr uintptr_t kFsCacheClearAddr = 0x02009B64;
 constexpr uintptr_t kFsCacheSetup3DFileAddr = 0x02009DEC;
+constexpr uintptr_t kFsCacheInternalClearAddr = 0x02009D30;
+constexpr uintptr_t kFsCacheActiveFileCacheAddr = 0x02085E0C;
+constexpr uintptr_t kFsCacheFileCache0Addr = 0x02086A30;
+constexpr uintptr_t kFsCacheFileCache1Addr = 0x02085E30;
 constexpr uintptr_t kDcStoreRangeAddr = 0x02065ccc;
 constexpr uintptr_t kDcFlushRangeAddr = 0x02065ce8;
 constexpr uintptr_t kDcWaitWriteBufferEmptyAddr = 0x02065d0c;
@@ -78,7 +83,9 @@ using FSOpenFileFastFn = int (*)(FSFile *file, int archive, uint32_t file_id);
 using FSReadFileFn = int (*)(FSFile *file, void *dest, uint32_t size);
 using FSCloseFileFn = int (*)(FSFile *file);
 using FSLoadExtFileToDestFn = int (*)(uint32_t ext_file_id, void *dest, int size);
+using FSCacheClearFn = void (*)();
 using FSCacheSetup3DFileFn = bool (*)(void *file, bool unload_textures);
+using FSCacheInternalClearFn = void (*)(FS::Cache::CacheEntry *cache, uint32_t entries);
 using DCStoreRangeFn = void (*)(const void *start, int size);
 using DCFlushRangeFn = void (*)(void *start, int size);
 using DCWaitWriteBufferEmptyFn = void (*)();
@@ -95,8 +102,11 @@ FSReadFileFn FSReadFile = reinterpret_cast<FSReadFileFn>(kFsReadFileAddr);
 FSCloseFileFn FSCloseFile = reinterpret_cast<FSCloseFileFn>(kFsCloseFileAddr);
 FSLoadExtFileToDestFn FSLoadExtFileToDest =
     reinterpret_cast<FSLoadExtFileToDestFn>(kFsLoadExtFileToDestAddr);
+FSCacheClearFn FSCacheClear = reinterpret_cast<FSCacheClearFn>(kFsCacheClearAddr);
 FSCacheSetup3DFileFn FSCacheSetup3DFile =
     reinterpret_cast<FSCacheSetup3DFileFn>(kFsCacheSetup3DFileAddr);
+FSCacheInternalClearFn FSCacheInternalClear =
+    reinterpret_cast<FSCacheInternalClearFn>(kFsCacheInternalClearAddr);
 DCStoreRangeFn DCStoreRange = reinterpret_cast<DCStoreRangeFn>(kDcStoreRangeAddr);
 DCFlushRangeFn DCFlushRange = reinterpret_cast<DCFlushRangeFn>(kDcFlushRangeAddr);
 DCWaitWriteBufferEmptyFn DCWaitWriteBufferEmpty =
@@ -387,6 +397,53 @@ bool FinalizePromotedFile(void *data, uint32_t size) {
     DCStoreRange(data, static_cast<int>(size));
     DCWaitWriteBufferEmpty();
     return true;
+}
+
+void ClearCacheTableForReset(uint16_t scene_id) {
+    if (scene_id == kModRuntimeSceneEventOverlayUnload) {
+        FSCacheClear();
+        Log() << "[DSI-MEM][LIFECYCLE] cleared all cache tables scene=" << Log::Hex
+              << scene_id << Log::Dec << "\n";
+        return;
+    }
+
+    volatile uint32_t *const active_cache =
+        reinterpret_cast<volatile uint32_t *>(kFsCacheActiveFileCacheAddr);
+    const uint32_t active_index = *active_cache;
+    auto *const cache0 = reinterpret_cast<FS::Cache::CacheEntry *>(kFsCacheFileCache0Addr);
+    auto *const cache1 = reinterpret_cast<FS::Cache::CacheEntry *>(kFsCacheFileCache1Addr);
+
+    FS::Cache::CacheEntry *cache_to_clear = nullptr;
+    uint32_t cleared_index = 0xffffffffu;
+
+    if (scene_id == kModRuntimeSceneEventOverlayUnload) {
+        if (active_index == 0u) {
+            cache_to_clear = cache0;
+            cleared_index = 0u;
+        } else if (active_index == 1u) {
+            cache_to_clear = cache1;
+            cleared_index = 1u;
+        }
+    } else {
+        if (active_index == 0u) {
+            cache_to_clear = cache1;
+            cleared_index = 1u;
+        } else if (active_index == 1u) {
+            cache_to_clear = cache0;
+            cleared_index = 0u;
+        }
+    }
+
+    if (cache_to_clear == nullptr) {
+        Log() << "[DSI-MEM][LIFECYCLE] cache clear skipped scene=" << Log::Hex << scene_id
+              << Log::Dec << " active=" << active_index << "\n";
+        return;
+    }
+
+    FSCacheInternalClear(cache_to_clear, 128);
+    Log() << "[DSI-MEM][LIFECYCLE] cleared cache table scene=" << Log::Hex << scene_id
+          << Log::Dec << " active=" << active_index
+          << " cleared=" << cleared_index << "\n";
 }
 
 void ResetExtraRamPoolState() {
@@ -771,6 +828,43 @@ void *ModRuntime_ExtraRamAlloc(uint32_t size, uint32_t alignment) {
     return ptr;
 }
 
+void *ModRuntime_TryResizeExtraRamTail(void *ptr, uint32_t new_size) {
+    if (!g_extra_ram_pool_ready || ptr == nullptr || new_size == 0u) {
+        return nullptr;
+    }
+
+    const uintptr_t base = g_extra_ram_pool_base_addr;
+    const uintptr_t addr = reinterpret_cast<uintptr_t>(ptr);
+    if (addr < base || addr >= (base + g_extra_ram_pool_size)) {
+        return nullptr;
+    }
+
+    const uint32_t offset = static_cast<uint32_t>(addr - base);
+    if (offset > g_extra_ram_pool_cursor) {
+        return nullptr;
+    }
+
+    const uint32_t current_size = g_extra_ram_pool_cursor - offset;
+    if (new_size <= current_size) {
+        return ptr;
+    }
+
+    if (offset > g_extra_ram_pool_size || new_size > (g_extra_ram_pool_size - offset)) {
+        g_debug_state.extram_alloc_failures++;
+        return nullptr;
+    }
+
+    auto *tail = reinterpret_cast<uint8_t *>(ptr) + current_size;
+    ZeroBytes(tail, new_size - current_size);
+
+    g_extra_ram_pool_cursor = offset + new_size;
+    g_debug_state.extram_pool_cursor = g_extra_ram_pool_cursor;
+    g_debug_state.extram_last_alloc_addr = static_cast<uint32_t>(addr);
+    g_debug_state.extram_last_alloc_size = new_size;
+    g_debug_state.extram_last_alloc_alignment = 4u;
+    return ptr;
+}
+
 bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_data, uint32_t source_size,
                                      ModRuntimeDsiFileLoadResult *out_result) {
     if (out_result == nullptr) {
@@ -923,7 +1017,8 @@ bool ModRuntime_LoadValidatedFile(const char *path, uint32_t expected_magic, uin
     return false;
 }
 
-void ModRuntime_ExtraRamReset() {
+void ModRuntime_ExtraRamReset(uint16_t scene_id) {
+    ClearCacheTableForReset(scene_id);
     g_extra_ram_pool_cursor = 0;
     g_extra_ram_reset_pending = false;
     ResetPromotedFiles();
@@ -940,8 +1035,11 @@ uint32_t ModRuntime_GetPromotedFileCount() {
 }
 
 void ModRuntime_NotifySceneChange(uint16_t scene_id) {
+    g_debug_state.last_scene_change_id = scene_id;
+
     // Area-switch hooks can fire while old area assets are still live.
-    // Defer reset until an explicit safe boundary (area enter / overlay unload).
+    // In practice, area-enter is still too early for some live animation state,
+    // so defer the reset until overlay unload.
     if (scene_id == kModRuntimeSceneEventSwitchArea ||
         scene_id == kModRuntimeSceneEventAreaLeave) {
         if (!g_extra_ram_reset_pending) {
@@ -952,13 +1050,12 @@ void ModRuntime_NotifySceneChange(uint16_t scene_id) {
     }
 
     const bool safe_reset_boundary =
-        scene_id == kModRuntimeSceneEventAreaEnter ||
         scene_id == kModRuntimeSceneEventOverlayUnload;
     if (safe_reset_boundary && g_extra_ram_pool_ready &&
         (g_extra_ram_reset_pending || scene_id == kModRuntimeSceneEventOverlayUnload)) {
         Log() << "[DSI-MEM][LIFECYCLE] applying deferred reset scene="
               << Log::Hex << scene_id << Log::Dec << "\n";
-        ModRuntime_ExtraRamReset();
+        ModRuntime_ExtraRamReset(scene_id);
     }
     NotifyOverlaySceneChange(scene_id);
 }

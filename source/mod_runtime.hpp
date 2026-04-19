@@ -108,13 +108,14 @@ bool ModRuntime_IsDsiCompatModeLikely();
 bool ModRuntime_IsCompatUnlockEnabled();
 bool ModRuntime_IsExtraRamPoolReady();
 void *ModRuntime_ExtraRamAlloc(uint32_t size, uint32_t alignment = 32);
+void *ModRuntime_TryResizeExtraRamTail(void *ptr, uint32_t new_size);
 bool ModRuntime_TryLoadFileToExtraRam(uint32_t ext_file_id, ModRuntimeDsiFilePolicy policy,
                                       ModRuntimeDsiFileLoadResult *out_result);
 bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_data, uint32_t source_size,
                                      ModRuntimeDsiFileLoadResult *out_result);
 bool ModRuntime_LoadValidatedFile(const char *path, uint32_t expected_magic, uint32_t *out_ext_file_id,
                                   void **out_file);
-void ModRuntime_ExtraRamReset();
+void ModRuntime_ExtraRamReset(uint16_t scene_id);
 uint32_t ModRuntime_GetExtraRamGeneration();
 uint32_t ModRuntime_GetPromotedFileCount();
 void ModRuntime_NotifySceneChange(uint16_t scene_id);
