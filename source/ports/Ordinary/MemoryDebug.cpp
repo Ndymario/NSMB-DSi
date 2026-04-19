@@ -11,14 +11,11 @@ constexpr u32 kPreloadToDsiMinSize = 0xC000u;
 constexpr u32 kPromoteAfterLoadMinSize = 0x2000u;
 constexpr uintptr_t kExtraRamPoolBaseAddr = 0x02c10000u;
 constexpr uintptr_t kExtraRamPoolEndAddr = 0x02ffffffu;
-constexpr u32 kSetup3DClearLogLimit = 8u;
-
 u32 g_loading_ext_file_id = kNoLoadingExtFileId;
 bool g_low_heap_logged = false;
 bool g_setup3d_in_progress = false;
 u32 g_setup3d_file_id = kNoLoadingExtFileId;
 void *g_setup3d_file_data = nullptr;
-u32 g_setup3d_clear_log_count = 0;
 
 u32 ToRealFileId(u32 ext_file_id) {
     if (ext_file_id == kNoLoadingExtFileId) {
@@ -30,9 +27,11 @@ u32 ToRealFileId(u32 ext_file_id) {
 bool ShouldKeepOnMainHeap(u32 ext_file_id) {
     const u32 real_file_id = ToRealFileId(ext_file_id);
 
-    // realID 1870 crashes on reload immediately after returning the promoted buffer.
-    // Keep it on the original heap until its consumer path is understood.
-    return real_file_id == 1870u;
+    // Some particle SPA archives are not safe to bounce through the DSi pool on reload.
+    // realID 1861 (particle/spl_b01_kpa.spa) now reproduces the same second-entry crash
+    // pattern that realID 1870 (particle/spl_coursesel.spa) already had.
+    // Keep these on the original heap until their consumer lifetime is understood.
+    return real_file_id == 1861u || real_file_id == 1870u;
 }
 
 void LogDsiPoolState(const char *tag) {
@@ -272,7 +271,6 @@ BOOL Setup3DFile_NNSG3dResDefaultSetup_Hook(void *pResData) {
     g_setup3d_in_progress = true;
     g_setup3d_file_id = g_loading_ext_file_id;
     g_setup3d_file_data = pResData;
-    g_setup3d_clear_log_count = 0;
 
     Log() << "[DSI-MEM][3D] setup start"
           << " realID=" << ToRealFileId(g_setup3d_file_id)
@@ -288,27 +286,12 @@ BOOL Setup3DFile_NNSG3dResDefaultSetup_Hook(void *pResData) {
     g_setup3d_in_progress = false;
     g_setup3d_file_id = kNoLoadingExtFileId;
     g_setup3d_file_data = nullptr;
-    g_setup3d_clear_log_count = 0;
     return result;
 }
 
 ncp_call(0x02009E60)
 void *Setup3DFile_ResizeHeapShim_Hook(Heap *heap, void *ptr, u32 newSize) {
     return Setup3DFile_ResizeHeapShim(heap, ptr, newSize);
-}
-
-ncp_hook(0x02066e98)
-void MIi_CpuClear32_Hook(u32 data, void *dest, u32 size) {
-    if (!g_setup3d_in_progress || g_setup3d_clear_log_count >= kSetup3DClearLogLimit) {
-        return;
-    }
-
-    g_setup3d_clear_log_count++;
-    Log() << "[DSI-MEM][3D] clear32"
-          << " realID=" << ToRealFileId(g_setup3d_file_id)
-          << " fill=" << Log::Hex << data
-          << " dest=" << reinterpret_cast<uintptr_t>(dest)
-          << Log::Dec << " size=" << size << "\n";
 }
 
 ncp_repl(0x020450D4, "NOP")
