@@ -15,7 +15,6 @@ Reviewed code:
 - Supporting behavior context:
   - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyController.cpp`
   - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyChaser.cpp`
-  - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyBoss/SpookyBoss.cpp`
   - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/dsi_compat_warning.cpp`
 
 ---
@@ -78,10 +77,6 @@ Separate FS cache overlay path + custom runtime overlay binary loader.
 `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyController.cpp:52`
 - Chaser: `/z_new/Ordinary/actors/Chaser_L.nsbtx`, `/z_new/Ordinary/actors/Chaser_M.nsbtx`
 `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyChaser.cpp:27`
-- Boss model/anim:
-`/z_new/Ordinary/actors/spookyBossLuigi.nsbmd`
-`/z_new/Ordinary/actors/spookyBossLuigiIdle.nsbca`
-`/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyBoss/SpookyBoss.cpp:49`
 
 ### Call Flow
 ```mermaid
@@ -96,7 +91,7 @@ flowchart TD
     G -- Yes --> I["Spawn dispatch for custom IDs"]
     I --> J["Ordinary overlay scene callbacks"]
     J --> K["Stage/area transitions"]
-    K --> L["Ordinary resource loads (controller/chaser/boss)"]
+    K --> L["Ordinary resource loads (controller/chaser)"]
     L --> M["FS heap load / promote-to-DSi / fallback-load paths"]
     M --> N["Bowser arena + recurring transition cycles"]
 ```
@@ -262,7 +257,7 @@ Proposed interfaces:
 - Pass: no stale pointers after scene switches; callbacks consistent.
 
 6. Long-run stability:
-- 30+ transitions with periodic spooky/chaser/boss events.
+- 30+ transitions with periodic spooky/chaser events.
 - Pass: no monotonic leak in DSi pool usage beyond policy scope.
 
 7. Low-memory deterministic behavior:
@@ -275,4 +270,3 @@ Proposed interfaces:
 2. This review is spec-only and does not patch runtime behavior.
 3. Default target architecture: single shared DSi memory loader with explicit lifecycle and policy.
 4. When current behavior conflicts with docs, docs win unless compatibility exception is explicitly documented.
-

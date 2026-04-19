@@ -49,7 +49,6 @@ This is the implementation handoff list mapped to concrete files/functions.
 - Symptoms: occasional incorrect Ordinary graphics after area change.
 - Code:
   - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyChaser.cpp:12`
-  - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyBoss/SpookyBoss.cpp:17`
   - `/Users/ndymario/NSMB-DS-Modding/NSMB-DSi/source/ports/Ordinary/SpookyController.cpp:45`
 - Required change:
   - Tie asset pointer validity to `DsiMem` lifecycle generation IDs.
@@ -97,4 +96,3 @@ This is the implementation handoff list mapped to concrete files/functions.
 2. DSI-002 (remove file-id special-case), DSI-005 (resource generation validity).
 3. DSI-006 (overlay loader normalization), DSI-007 (mapping ownership).
 4. DSI-008 and DSI-009 cleanup.
-

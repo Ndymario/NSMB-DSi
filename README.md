@@ -77,7 +77,6 @@ This produces:
 Current translated custom IDs:
 - `0x0300`: SpookyController entry (translated overlay-side controller trigger)
 - `0x0301`: Spooky Chaser path
-- `0x0302`: Spooky boss block projectile path
 
 ## Ordinary NitroFS sync
 
@@ -85,18 +84,14 @@ Ordinary NitroFS assets are copied into this repo under:
 - `nitrofs/banner.bin`
 - `nitrofs/course/H12_1.bin`
 - `nitrofs/course/H12_1_bgdat.bin`
-- `nitrofs/course/H12_3.bin`
-- `nitrofs/course/H12_3_bgdat.bin`
 - `nitrofs/z_new/Ordinary/actors/*`
 - `nitrofs/z_new/dummy.txt`
 
 ## Ordinary gameplay source port
 
-To support spooky controller and boss behavior, these Ordinary code modules are copied into this repo and built by NCPatcher:
+To support spooky controller behavior, these Ordinary code modules are copied into this repo and built by NCPatcher:
 - `source/ports/Ordinary/SpookyController.cpp`
 - `source/ports/Ordinary/SpookyChaser.cpp`
-- `source/ports/Ordinary/SpookyBoss/SpookyBoss.cpp`
-- `source/ports/Ordinary/SpookyBoss/BlockProjectile.cpp`
 - `source/NSBTX.cpp`
 - `source/lighting/extralighting.cpp`
 - `source/ports/Ordinary/util/collisionviewer.cpp`

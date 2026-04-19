@@ -34,8 +34,6 @@ extern "C" void* OrdinaryOverlay_SpawnCustom(uint16_t object_id,
         }
         case kCustomSpookyChaser:
             return g_host_api->spawn_original(kOrdinarySpookyChaserActor, parent_node, settings, base_type);
-        case kCustomBossBlock:
-            return g_host_api->spawn_original(kOrdinaryBossBlockActor, parent_node, settings, base_type);
         default:
             return nullptr;
     }
