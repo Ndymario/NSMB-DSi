@@ -2,7 +2,7 @@ ENTRY(OrdinaryOverlay_Entry)
 
 SECTIONS
 {
-    . = 0x02800020;
+    . = __ORDINARY_OVERLAY_LOAD_ADDR__;
 
     .text : ALIGN(4)
     {
@@ -25,4 +25,3 @@ SECTIONS
         __ordinary_overlay_bss_end = .;
     }
 }
-

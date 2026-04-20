@@ -2,7 +2,7 @@
 
 #include "nsmb.hpp"
 
-// Example helper API for mod code that wants clean DSi-vs-NDS branching.
+// Example helper API for mod code that wants clean enhanced-memory-vs-NDS branching.
 namespace ModRuntimeExample {
 
 constexpr u16 kCustomExampleObjectMin = 0x0300;

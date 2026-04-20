@@ -24,8 +24,8 @@ u16 SelectObjectIdForCurrentMode(u16 vanilla_object_id, u16 custom_object_id) {
         return vanilla_object_id;
     }
 
-    // Only route custom actors when DSi mode is enabled and the overlay is actually ready.
-    if (ModRuntime_IsDsiModeEnabled() && ModRuntime_IsOverlayReady()) {
+    // Only route custom actors when an enhanced-memory mode is enabled and the overlay is ready.
+    if (ModRuntime_IsEnhancedMemoryModeEnabled() && ModRuntime_IsOverlayReady()) {
         g_branch_counters.dsi_overlay_ready_calls++;
         g_branch_counters.last_dispatched_id = custom_object_id;
         return custom_object_id;

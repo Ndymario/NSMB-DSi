@@ -10,6 +10,8 @@ namespace {
 constexpr uintptr_t kScfgA9RomAddr = 0x04004000;
 constexpr uintptr_t kScfgExt9Addr = 0x04004008;
 constexpr uintptr_t kSndExCntAddr = 0x04004700;
+constexpr uintptr_t kExMemCntAddr = 0x04000204;
+constexpr uintptr_t kOperaSlot2UnlockAddr = 0x08240000;
 constexpr uint32_t kArchiveFileIdBase = 131;
 
 constexpr uintptr_t kBaseSpawnAddr = 0x0204c9a4;
@@ -31,18 +33,27 @@ constexpr uintptr_t kDcWaitWriteBufferEmptyAddr = 0x02065d0c;
 constexpr uintptr_t kIcInvalidateRangeAddr = 0x02065d24;
 constexpr uintptr_t kOsEnableProtectionUnitAddr = 0x02066230;
 constexpr uintptr_t kOsSetProtectionRegion1Addr = 0x02066250;
+constexpr uint32_t kExpansionOverlayPuRegionIndex = 3u;
 
-constexpr uintptr_t kOverlayImageBaseAddr = 0x02800000;
-constexpr uintptr_t kOverlayImageEndAddr = 0x028fffff;
-constexpr uintptr_t kOverlayHeapBaseAddr = 0x02900000;
-constexpr uintptr_t kOverlayGuardBaseAddr = 0x02c00000;
-constexpr uintptr_t kExtraRamPoolStrictBaseAddr = 0x02c10000;
-constexpr uintptr_t kExtraRamPoolStrictEndAddr = 0x02ffffff;
-constexpr uint32_t kExtraRamPoolStrictSize = kExtraRamPoolStrictEndAddr - kExtraRamPoolStrictBaseAddr + 1;
-constexpr uint32_t kExtraRamProbePattern = 0x44534921;  // "DSI!"
+constexpr uintptr_t kDsiOverlayImageBaseAddr = 0x02800000;
+constexpr uintptr_t kDsiOverlayImageEndAddr = 0x028fffff;
+constexpr uintptr_t kDsiOverlayHeapBaseAddr = 0x02900000;
+constexpr uintptr_t kDsiOverlayGuardBaseAddr = 0x02c00000;
+constexpr uintptr_t kDsiExtraRamPoolBaseAddr = 0x02c10000;
+constexpr uintptr_t kDsiExtraRamPoolEndAddr = 0x02ffffff;
+
+constexpr uintptr_t kExpansionOverlayImageBaseAddr = 0x09000000;
+constexpr uintptr_t kExpansionOverlayImageEndAddr = 0x091fffff;
+constexpr uintptr_t kExpansionOverlayHeapBaseAddr = 0x09200000;
+constexpr uintptr_t kExpansionOverlayGuardBaseAddr = 0x09800000;
+constexpr uintptr_t kExpansionExtraRamPoolBaseAddr = 0x09200000;
+constexpr uintptr_t kExpansionExtraRamPoolEndAddr = 0x097fffff;
+
+constexpr uint32_t kExtraRamProbePattern = 0x584D454Du;  // "XMEM"
 constexpr uint16_t kScfgA9RomDsiMode = 0x0001;
 constexpr uint32_t kMagicNsbtx = 0x30585442;  // "BTX0"
 constexpr uint32_t kMagicNsbmd = 0x30444D42;  // "BMD0"
+constexpr uint32_t kExMemCntSlot2Arm7 = 1u << 7;
 
 // Ghidra: OS_InitArenaEx writes 0x0200002B to region1 (4MB). 16MB is size-field +2.
 constexpr uint32_t kMpuMainRamRegion4Mb = 0x0200002b;
@@ -50,19 +61,55 @@ constexpr uint32_t kMpuMainRamRegion16Mb = 0x0200002f;
 static_assert(kMpuMainRamRegion16Mb == (kMpuMainRamRegion4Mb + 4u),
               "MPU main RAM region16 descriptor should be the 4MB descriptor with a larger size.");
 
-static_assert(kExtraRamPoolStrictBaseAddr > kOverlayGuardBaseAddr,
+static_assert(kDsiExtraRamPoolBaseAddr > kDsiOverlayGuardBaseAddr,
               "DSi extra RAM pool must be above overlay guard.");
 
-constexpr uint32_t kOverlayMaxImageSize = kOverlayImageEndAddr - kOverlayImageBaseAddr + 1;
-constexpr uint32_t kOverlayTotalRegionSize = kOverlayGuardBaseAddr - kOverlayImageBaseAddr;
-constexpr uint32_t kOverlayMaxBssSize = kOverlayTotalRegionSize - kOverlayMaxImageSize;
 constexpr uint32_t kDsiPromoteMinSize = 0x2000;  // 8KB
 
 constexpr uint16_t kCustomObjectMin = 0x0300;
 constexpr uint16_t kCustomObjectMax = 0x03ff;
-constexpr const char* kOverlayPaths[] = {
+constexpr const char *kDsiOverlayPaths[] = {
     "/z_new/mod/ordinaryovl.bin",
     "/z_new/mod/modovl.bin",
+};
+constexpr const char *kExpansionOverlayPaths[] = {
+    "/z_new/mod/ordinaryovl_expansion.bin",
+};
+
+struct RuntimeMemoryLayout {
+    ModRuntimeMemoryTier memory_tier;
+    uintptr_t overlay_image_base_addr;
+    uintptr_t overlay_image_end_addr;
+    uintptr_t overlay_heap_base_addr;
+    uintptr_t overlay_guard_base_addr;
+    uintptr_t extra_ram_pool_base_addr;
+    uintptr_t extra_ram_pool_end_addr;
+    const char *const *overlay_paths;
+    uint32_t overlay_path_count;
+};
+
+constexpr RuntimeMemoryLayout kDsiMemoryLayout = {
+    ModRuntimeMemoryTier::DSI,
+    kDsiOverlayImageBaseAddr,
+    kDsiOverlayImageEndAddr,
+    kDsiOverlayHeapBaseAddr,
+    kDsiOverlayGuardBaseAddr,
+    kDsiExtraRamPoolBaseAddr,
+    kDsiExtraRamPoolEndAddr,
+    kDsiOverlayPaths,
+    sizeof(kDsiOverlayPaths) / sizeof(kDsiOverlayPaths[0]),
+};
+
+constexpr RuntimeMemoryLayout kExpansionMemoryLayout = {
+    ModRuntimeMemoryTier::EXPANSION_PAK,
+    kExpansionOverlayImageBaseAddr,
+    kExpansionOverlayImageEndAddr,
+    kExpansionOverlayHeapBaseAddr,
+    kExpansionOverlayGuardBaseAddr,
+    kExpansionExtraRamPoolBaseAddr,
+    kExpansionExtraRamPoolEndAddr,
+    kExpansionOverlayPaths,
+    sizeof(kExpansionOverlayPaths) / sizeof(kExpansionOverlayPaths[0]),
 };
 
 struct RuntimeFSFileID {
@@ -118,7 +165,9 @@ OSEnableProtectionUnitFn OSEnableProtectionUnit =
 OSSetProtectionRegion1Fn OSSetProtectionRegion1 =
     reinterpret_cast<OSSetProtectionRegion1Fn>(kOsSetProtectionRegion1Addr);
 
-auto *const kOverlayImageBase = reinterpret_cast<uint8_t *>(kOverlayImageBaseAddr);
+const RuntimeMemoryLayout *g_active_memory_layout = nullptr;
+uint8_t *g_overlay_image_base = nullptr;
+ModRuntimeMemoryTier g_mod_runtime_memory_tier = ModRuntimeMemoryTier::NONE;
 ModRuntimeMode g_mod_runtime_mode = ModRuntimeMode::UNINITIALIZED;
 ModRuntimeDebugState g_debug_state = {};
 bool g_bootstrap_finished = false;
@@ -128,8 +177,11 @@ bool g_extra_ram_pool_ready = false;
 bool g_extra_ram_reset_pending = false;
 uint32_t g_extra_ram_pool_cursor = 0;
 uint32_t g_extra_ram_generation = 1;
-uintptr_t g_extra_ram_pool_base_addr = kExtraRamPoolStrictBaseAddr;
-uint32_t g_extra_ram_pool_size = kExtraRamPoolStrictSize;
+uintptr_t g_extra_ram_pool_base_addr = 0;
+uint32_t g_extra_ram_pool_size = 0;
+uint32_t g_prebootstrap_expansion_reserved_top = 0;
+bool g_prebootstrap_expansion_available = false;
+bool g_prebootstrap_expansion_checked = false;
 
 struct PromotedFileEntry {
     uint32_t ext_file_id;
@@ -148,16 +200,22 @@ constexpr uint32_t kDetectOk = 0;
 constexpr uint32_t kDetectFailScfgExt9Bit31 = 1;
 constexpr uint32_t kDetectFailScfgA9Rom = 2;
 constexpr uint32_t kDetectFailRamLimit = 3;
+constexpr uint32_t kDetectFailExpansionBusOwner = 4;
 constexpr uint32_t kDetectFailMpuConfig = 5;
+constexpr uint32_t kDetectFailExpansionUnlock = 6;
+constexpr uint32_t kDetectFailExpansionProbe = 7;
 
-constexpr uint32_t kTwlFailStageNone = 0;
-constexpr uint32_t kTwlFailStageExt9Bit31 = 1;
-constexpr uint32_t kTwlFailStageA9Rom = 2;
-constexpr uint32_t kTwlFailStageRamLimit = 3;
-constexpr uint32_t kTwlFailStageMpu = 4;
+constexpr uint32_t kExtraRamFailStageNone = 0;
+constexpr uint32_t kExtraRamFailStageTwlExt9Bit31 = 1;
+constexpr uint32_t kExtraRamFailStageTwlA9Rom = 2;
+constexpr uint32_t kExtraRamFailStageTwlRamLimit = 3;
+constexpr uint32_t kExtraRamFailStageTwlMpu = 4;
+constexpr uint32_t kExtraRamFailStageExpansionBusOwner = 5;
+constexpr uint32_t kExtraRamFailStageExpansionUnlock = 6;
+constexpr uint32_t kExtraRamFailStageExpansionProbe = 7;
 
 constexpr uint32_t kOverlaySkipNone = 0;
-constexpr uint32_t kOverlaySkipNotTwl = 1;
+constexpr uint32_t kOverlaySkipNoEnhancedMemory = 1;
 constexpr uint32_t kOverlaySkipFileUnavailable = 2;
 constexpr uint32_t kOverlaySkipHeaderInvalid = 3;
 constexpr uint32_t kOverlaySkipEntryFailed = 4;
@@ -182,8 +240,14 @@ const char *DetectReasonLabelInternal(uint32_t code) {
             return "a9rom_not_twl";
         case kDetectFailRamLimit:
             return "ram_limit_below_16mb";
+        case kDetectFailExpansionBusOwner:
+            return "slot2_not_owned_by_arm9";
         case kDetectFailMpuConfig:
             return "mpu_region1_not_16mb";
+        case kDetectFailExpansionUnlock:
+            return "slot2_unlock_failed";
+        case kDetectFailExpansionProbe:
+            return "slot2_ram_probe_failed";
         default:
             return "unknown";
     }
@@ -193,8 +257,8 @@ const char *OverlaySkipReasonLabelInternal(uint32_t code) {
     switch (code) {
         case kOverlaySkipNone:
             return "none";
-        case kOverlaySkipNotTwl:
-            return "not_twl_mode";
+        case kOverlaySkipNoEnhancedMemory:
+            return "no_enhanced_memory";
         case kOverlaySkipFileUnavailable:
             return "overlay_file_unavailable";
         case kOverlaySkipHeaderInvalid:
@@ -216,10 +280,76 @@ inline uint32_t ReadU32(uintptr_t addr) {
     return *reinterpret_cast<volatile uint32_t *>(addr);
 }
 
+inline void WriteU16(uintptr_t addr, uint16_t value) {
+    *reinterpret_cast<volatile uint16_t *>(addr) = value;
+}
+
+inline void WriteU32(uintptr_t addr, uint32_t value) {
+    *reinterpret_cast<volatile uint32_t *>(addr) = value;
+}
+
+uint32_t GetOverlayMaxImageSize() {
+    if (g_active_memory_layout == nullptr) {
+        return 0;
+    }
+    return static_cast<uint32_t>(g_active_memory_layout->overlay_image_end_addr -
+                                 g_active_memory_layout->overlay_image_base_addr + 1u);
+}
+
+uint32_t GetOverlayTotalRegionSize() {
+    if (g_active_memory_layout == nullptr) {
+        return 0;
+    }
+    return static_cast<uint32_t>(g_active_memory_layout->overlay_guard_base_addr -
+                                 g_active_memory_layout->overlay_image_base_addr);
+}
+
+uint32_t GetOverlayMaxBssSize() {
+    const uint32_t image_size = GetOverlayMaxImageSize();
+    const uint32_t total_size = GetOverlayTotalRegionSize();
+    return (total_size >= image_size) ? (total_size - image_size) : 0u;
+}
+
 uint32_t ReadMpuMainRamRegionValue() {
     uint32_t value = 0;
     asm volatile("mrc p15, 0, %0, c6, c1, 0" : "=r"(value));
     return value;
+}
+
+uint32_t ReadPuRegionValue(uint32_t region_index) {
+    uint32_t value = 0;
+    switch (region_index) {
+        case 0: asm volatile("mrc p15, 0, %0, c6, c0, 0" : "=r"(value)); break;
+        case 1: asm volatile("mrc p15, 0, %0, c6, c1, 0" : "=r"(value)); break;
+        case 2: asm volatile("mrc p15, 0, %0, c6, c2, 0" : "=r"(value)); break;
+        case 3: asm volatile("mrc p15, 0, %0, c6, c3, 0" : "=r"(value)); break;
+        case 4: asm volatile("mrc p15, 0, %0, c6, c4, 0" : "=r"(value)); break;
+        case 5: asm volatile("mrc p15, 0, %0, c6, c5, 0" : "=r"(value)); break;
+        case 6: asm volatile("mrc p15, 0, %0, c6, c6, 0" : "=r"(value)); break;
+        case 7: asm volatile("mrc p15, 0, %0, c6, c7, 0" : "=r"(value)); break;
+        default: break;
+    }
+    return value;
+}
+
+uint32_t ReadPuInstructionPermissions() {
+    uint32_t value = 0;
+    asm volatile("mrc p15, 0, %0, c5, c0, 1" : "=r"(value));
+    return value;
+}
+
+void WritePuInstructionPermissions(uint32_t value) {
+    asm volatile("mcr p15, 0, %0, c5, c0, 1" : : "r"(value));
+}
+
+uint32_t ReadPuExtendedInstructionPermissions() {
+    uint32_t value = 0;
+    asm volatile("mrc p15, 0, %0, c5, c0, 3" : "=r"(value));
+    return value;
+}
+
+void WritePuExtendedInstructionPermissions(uint32_t value) {
+    asm volatile("mcr p15, 0, %0, c5, c0, 3" : : "r"(value));
 }
 
 void FillBytes(uint8_t *dest, uint8_t value, uint32_t size) {
@@ -233,10 +363,38 @@ void ZeroBytes(uint8_t *dest, uint32_t size) {
 }
 
 void CopyBytes(void *dest, const void *src, uint32_t size) {
-    auto *dst = reinterpret_cast<uint8_t *>(dest);
-    auto *source = reinterpret_cast<const uint8_t *>(src);
-    for (uint32_t i = 0; i < size; ++i) {
-        dst[i] = source[i];
+    const uintptr_t dest_addr = reinterpret_cast<uintptr_t>(dest);
+    const bool is_extra_ram_dest =
+        g_extra_ram_pool_size != 0u && dest_addr >= g_extra_ram_pool_base_addr &&
+        dest_addr < (g_extra_ram_pool_base_addr + g_extra_ram_pool_size);
+
+    auto *dst8 = reinterpret_cast<uint8_t *>(dest);
+    auto *source8 = reinterpret_cast<const uint8_t *>(src);
+    if (!is_extra_ram_dest) {
+        for (uint32_t i = 0; i < size; ++i) {
+            dst8[i] = source8[i];
+        }
+        return;
+    }
+
+    auto *dst32 = reinterpret_cast<volatile uint32_t *>(dest);
+    const auto *source32 = reinterpret_cast<const uint32_t *>(src);
+    uint32_t copied = 0u;
+
+    while ((copied + 4u) <= size) {
+        *dst32++ = *source32++;
+        copied += 4u;
+    }
+
+    if ((size - copied) >= 2u) {
+        *reinterpret_cast<volatile uint16_t *>(reinterpret_cast<uintptr_t>(dst8 + copied)) =
+            *reinterpret_cast<const uint16_t *>(source8 + copied);
+        copied += 2u;
+    }
+
+    if (copied < size) {
+        const uint16_t tail = source8[copied];
+        *reinterpret_cast<volatile uint16_t *>(reinterpret_cast<uintptr_t>(dst8 + copied)) = tail;
     }
 }
 
@@ -259,6 +417,14 @@ uint32_t AlignUp(uint32_t value, uint32_t alignment) {
     }
     const uint32_t mask = alignment - 1u;
     return (value + mask) & ~mask;
+}
+
+uintptr_t AlignDown(uintptr_t value, uint32_t alignment) {
+    if (alignment == 0) {
+        return value;
+    }
+    const uintptr_t mask = static_cast<uintptr_t>(alignment - 1u);
+    return value & ~mask;
 }
 
 bool HasExpectedMagic(const void *file, uint32_t expected_magic) {
@@ -358,11 +524,11 @@ void RememberPromotedFile(uint32_t ext_file_id, void *data, uint32_t size) {
     }
 }
 
-bool ShouldPromoteForPolicy(ModRuntimeDsiFilePolicy policy, uint32_t size) {
+bool ShouldPromoteForPolicy(ModRuntimeExtraRamFilePolicy policy, uint32_t size) {
     switch (policy) {
-        case ModRuntimeDsiFilePolicy::PROMOTE_ALWAYS:
+        case ModRuntimeExtraRamFilePolicy::PROMOTE_ALWAYS:
             return size != 0u;
-        case ModRuntimeDsiFilePolicy::PROMOTE_IF_LARGE:
+        case ModRuntimeExtraRamFilePolicy::PROMOTE_IF_LARGE:
             return size >= kDsiPromoteMinSize;
         default:
             return false;
@@ -390,7 +556,7 @@ bool FinalizePromotedFile(void *data, uint32_t size) {
         return true;
     }
 
-    if (!FSCacheSetup3DFile(data, false)) {
+    if (!FSCacheSetup3DFile(data, true)) {
         return false;
     }
 
@@ -444,6 +610,36 @@ void ClearCacheTableForReset(uint16_t scene_id) {
     Log() << "[DSI-MEM][LIFECYCLE] cleared cache table scene=" << Log::Hex << scene_id
           << Log::Dec << " active=" << active_index
           << " cleared=" << cleared_index << "\n";
+}
+
+void SetActiveMemoryLayout(const RuntimeMemoryLayout *layout) {
+    g_active_memory_layout = layout;
+    if (layout == nullptr) {
+        g_mod_runtime_memory_tier = ModRuntimeMemoryTier::NONE;
+        g_overlay_image_base = nullptr;
+        g_extra_ram_pool_base_addr = 0;
+        g_extra_ram_pool_size = 0;
+        g_debug_state.overlay_image_base = 0;
+        g_debug_state.overlay_image_size = 0;
+        g_debug_state.extram_pool_memory_tier = 0;
+        return;
+    }
+
+    g_mod_runtime_memory_tier = layout->memory_tier;
+    g_overlay_image_base = reinterpret_cast<uint8_t *>(layout->overlay_image_base_addr);
+    g_extra_ram_pool_base_addr = layout->extra_ram_pool_base_addr;
+    uintptr_t pool_end_addr = layout->extra_ram_pool_end_addr;
+    if (layout->memory_tier == ModRuntimeMemoryTier::EXPANSION_PAK &&
+        g_prebootstrap_expansion_reserved_top != 0u &&
+        g_prebootstrap_expansion_reserved_top <
+            (layout->extra_ram_pool_end_addr - layout->extra_ram_pool_base_addr + 1u)) {
+        pool_end_addr -= g_prebootstrap_expansion_reserved_top;
+    }
+    g_extra_ram_pool_size = static_cast<uint32_t>(pool_end_addr -
+                                                  layout->extra_ram_pool_base_addr + 1u);
+    g_debug_state.overlay_image_base = static_cast<uint32_t>(layout->overlay_image_base_addr);
+    g_debug_state.overlay_image_size = GetOverlayMaxImageSize();
+    g_debug_state.extram_pool_memory_tier = static_cast<uint32_t>(layout->memory_tier);
 }
 
 void ResetExtraRamPoolState() {
@@ -517,7 +713,8 @@ void WriteDetectSnapshot(const DsiRegisterState &state, bool extra_ram_ready) {
     g_debug_state.dsi_console_hint = state.dsi_console_hint ? 1u : 0u;
     g_debug_state.dsi_hw_likely = IsDsiHwLikely(state) ? 1u : 0u;
     g_debug_state.dsi_compat_mode_likely =
-        (g_debug_state.dsi_hw_likely != 0u && !extra_ram_ready) ? 1u : 0u;
+        (g_debug_state.dsi_hw_likely != 0u && !extra_ram_ready &&
+         g_mod_runtime_memory_tier == ModRuntimeMemoryTier::NONE) ? 1u : 0u;
 }
 
 void LogTwlGateSnapshot(const char *result_tag) {
@@ -529,7 +726,7 @@ void LogTwlGateSnapshot(const char *result_tag) {
           << " RAM_LIMIT=" << g_debug_state.raw_scfg_ext9_ram_limit
           << " MPU_BEFORE=" << Log::Hex << g_debug_state.mpu_mainram_before
           << " MPU_AFTER=" << g_debug_state.mpu_mainram_after << Log::Dec
-          << " FAIL_STAGE=" << g_debug_state.twl_fail_stage
+          << " FAIL_STAGE=" << g_debug_state.extra_ram_fail_stage
           << " REASON=" << g_debug_state.detect_fail_reason
           << " REASON_LABEL=" << DetectReasonLabelInternal(g_debug_state.detect_fail_reason)
           << "\n";
@@ -553,10 +750,118 @@ bool ConfigureMpuMainRamRegion16Mb() {
     return false;
 }
 
+bool ClaimSlot2ForArm9() {
+    const uint16_t before = ReadU16(kExMemCntAddr);
+    g_debug_state.raw_exmemcnt = before;
+    WriteU16(kExMemCntAddr, before & ~kExMemCntSlot2Arm7);
+    const uint16_t after = ReadU16(kExMemCntAddr);
+    g_debug_state.raw_exmemcnt = after;
+    return (after & kExMemCntSlot2Arm7) == 0u;
+}
+
+bool ProbeExpansionPakBase() {
+    volatile uint32_t *const probe =
+        reinterpret_cast<volatile uint32_t *>(kExpansionExtraRamPoolBaseAddr);
+    const uint32_t saved = *probe;
+    *probe = kExtraRamProbePattern;
+    const uint32_t readback = *probe;
+    *probe = saved;
+    return readback == kExtraRamProbePattern;
+}
+
+bool UnlockOperaExpansionPak() {
+    WriteU32(kOperaSlot2UnlockAddr, 1u);
+    const uint32_t value = ReadU32(kOperaSlot2UnlockAddr);
+    g_debug_state.raw_slot2_unlock = value;
+    if ((value & 1u) != 0u) {
+        return true;
+    }
+
+    // The unlock register echo is not reliable once Slot-2 RAM has already been
+    // opened earlier in boot. In that case, trust a direct RAM probe instead of
+    // forcing the runtime back to plain NDS mode.
+    if (ProbeExpansionPakBase()) {
+        return true;
+    }
+
+    return false;
+}
+
+bool EnsurePreBootstrapExpansionAvailable() {
+    if (g_prebootstrap_expansion_checked) {
+        return g_prebootstrap_expansion_available;
+    }
+
+    g_prebootstrap_expansion_checked = true;
+    g_prebootstrap_expansion_available =
+        ClaimSlot2ForArm9() && UnlockOperaExpansionPak() && ProbeExpansionPakBase();
+    return g_prebootstrap_expansion_available;
+}
+
+void *ReserveExpansionPakTop(uint32_t size, uint32_t alignment) {
+    if (size == 0u || !EnsurePreBootstrapExpansionAvailable()) {
+        return nullptr;
+    }
+
+    const uintptr_t pool_start = kExpansionExtraRamPoolBaseAddr;
+    const uintptr_t pool_end_exclusive = kExpansionExtraRamPoolEndAddr + 1u;
+    const uintptr_t current_end = pool_end_exclusive - g_prebootstrap_expansion_reserved_top;
+    if (current_end <= pool_start || size > (current_end - pool_start)) {
+        return nullptr;
+    }
+
+    const uintptr_t candidate = AlignDown(current_end - size, alignment);
+    if (candidate < pool_start || candidate >= current_end) {
+        return nullptr;
+    }
+
+    g_prebootstrap_expansion_reserved_top =
+        static_cast<uint32_t>(pool_end_exclusive - candidate);
+    return reinterpret_cast<void *>(candidate);
+}
+
+bool EnableExpansionOverlayExecution() {
+    const uint32_t region_value = ReadPuRegionValue(kExpansionOverlayPuRegionIndex);
+    const uint32_t region_base = region_value & 0xFFFFF000u;
+    const bool region_enabled = (region_value & 1u) != 0u;
+    if (!region_enabled || region_base != 0x08000000u) {
+        Log() << "[MODRUNTIME][EXPANSION][WARNING] PU region3 is not mapped to Slot-2 executable space."
+              << " region3=" << Log::Hex << region_value << Log::Dec << "\n";
+        return false;
+    }
+
+    const uint32_t ap_shift = kExpansionOverlayPuRegionIndex * 2u;
+    const uint32_t ext_shift = kExpansionOverlayPuRegionIndex * 4u;
+    uint32_t instr_ap = ReadPuInstructionPermissions();
+    uint32_t instr_ext_ap = ReadPuExtendedInstructionPermissions();
+
+    instr_ap &= ~(0x3u << ap_shift);
+    instr_ap |= (0x1u << ap_shift);  // Privileged execute/read allowed, user denied.
+    instr_ext_ap &= ~(0xFu << ext_shift);
+    instr_ext_ap |= (0x5u << ext_shift);  // Privileged read-only, user denied.
+
+    WritePuInstructionPermissions(instr_ap);
+    WritePuExtendedInstructionPermissions(instr_ext_ap);
+    OSEnableProtectionUnit();
+
+    const uint32_t applied_ap = ReadPuInstructionPermissions();
+    const uint32_t applied_ext_ap = ReadPuExtendedInstructionPermissions();
+    const bool applied =
+        (((applied_ap >> ap_shift) & 0x3u) == 0x1u) &&
+        (((applied_ext_ap >> ext_shift) & 0xFu) == 0x5u);
+    if (!applied) {
+        Log() << "[MODRUNTIME][EXPANSION][WARNING] Failed to enable executable instruction permissions"
+              << " instr_ap=" << Log::Hex << applied_ap
+              << " instr_ext=" << applied_ext_ap << Log::Dec << "\n";
+    }
+    return applied;
+}
+
 bool DetectAndEnableDsiExtraRam() {
     DsiRegisterState state = ReadDsiRegisters();
     g_debug_state.dsi_compat_warning_emitted = 0u;
-    g_debug_state.twl_fail_stage = kTwlFailStageNone;
+    g_debug_state.expansion_pak_detected = 0u;
+    g_debug_state.extra_ram_fail_stage = kExtraRamFailStageNone;
     g_debug_state.compat_unlock_candidate = 0u;
     g_debug_state.compat_unlock_active = 0u;
     g_debug_state.compat_unlock_attempts = 0u;
@@ -570,12 +875,13 @@ bool DetectAndEnableDsiExtraRam() {
     g_debug_state.raw_scfg_a9rom_after_unlock = state.a9rom;
     g_debug_state.raw_scfg_ext9_after_unlock = state.ext9;
     g_debug_state.raw_scfg_ext9_ram_limit_after_unlock = state.ram_limit;
+    g_debug_state.raw_exmemcnt = ReadU16(kExMemCntAddr);
+    g_debug_state.raw_slot2_unlock = 0u;
 
-    g_extra_ram_pool_base_addr = kExtraRamPoolStrictBaseAddr;
-    g_extra_ram_pool_size = kExtraRamPoolStrictSize;
-
+    SetActiveMemoryLayout(nullptr);
     bool extra_ram_ready = false;
     if (IsStrictTwlReady(state)) {
+        SetActiveMemoryLayout(&kDsiMemoryLayout);
         extra_ram_ready = ConfigureMpuMainRamRegion16Mb();
     }
 
@@ -588,26 +894,59 @@ bool DetectAndEnableDsiExtraRam() {
 
     g_debug_state.strict_twl_failed++;
     if (g_debug_state.mpu_update_failures != 0u) {
-        g_debug_state.twl_fail_stage = kTwlFailStageMpu;
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageTwlMpu;
         g_debug_state.detect_fail_reason = kDetectFailMpuConfig;
     } else if (state.ext9_bit31 == 0u) {
-        g_debug_state.twl_fail_stage = kTwlFailStageExt9Bit31;
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageTwlExt9Bit31;
         g_debug_state.detect_fail_reason = kDetectFailScfgExt9Bit31;
     } else if (state.ram_limit < 2u) {
-        g_debug_state.twl_fail_stage = kTwlFailStageRamLimit;
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageTwlRamLimit;
         g_debug_state.detect_fail_reason = kDetectFailRamLimit;
     } else {
-        g_debug_state.twl_fail_stage = kTwlFailStageA9Rom;
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageTwlA9Rom;
         g_debug_state.detect_fail_reason = kDetectFailScfgA9Rom;
     }
 
-    return false;
+    SetActiveMemoryLayout(&kExpansionMemoryLayout);
+    if (!ClaimSlot2ForArm9()) {
+        SetActiveMemoryLayout(nullptr);
+        WriteDetectSnapshot(state, false);
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageExpansionBusOwner;
+        g_debug_state.detect_fail_reason = kDetectFailExpansionBusOwner;
+        return false;
+    }
+
+    if (!UnlockOperaExpansionPak()) {
+        SetActiveMemoryLayout(nullptr);
+        WriteDetectSnapshot(state, false);
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageExpansionUnlock;
+        g_debug_state.detect_fail_reason = kDetectFailExpansionUnlock;
+        return false;
+    }
+
+    if (!InitializeExtraRamPool()) {
+        SetActiveMemoryLayout(nullptr);
+        WriteDetectSnapshot(state, false);
+        g_debug_state.extra_ram_fail_stage = kExtraRamFailStageExpansionProbe;
+        g_debug_state.detect_fail_reason = kDetectFailExpansionProbe;
+        return false;
+    }
+
+    WriteDetectSnapshot(state, true);
+    g_debug_state.detect_fail_reason = kDetectOk;
+    g_debug_state.expansion_pak_detected = 1u;
+    return true;
 }
 
 bool LoadOverlayImage(uint32_t *out_bytes_read) {
+    if (g_active_memory_layout == nullptr || g_overlay_image_base == nullptr) {
+        return false;
+    }
+
     RuntimeFSFileID file_id = {};
     bool found = false;
-    for (const char* path : kOverlayPaths) {
+    for (uint32_t i = 0; i < g_active_memory_layout->overlay_path_count; ++i) {
+        const char *path = g_active_memory_layout->overlay_paths[i];
         if (FSConvertPathToFileID(&file_id, const_cast<char*>(path)) != 0) {
             found = true;
             break;
@@ -624,8 +963,9 @@ bool LoadOverlayImage(uint32_t *out_bytes_read) {
         return false;
     }
 
-    FillBytes(kOverlayImageBase, 0xa5, kOverlayMaxImageSize);
-    const int bytes_read = FSReadFile(&file, kOverlayImageBase, kOverlayMaxImageSize);
+    const uint32_t overlay_max_image_size = GetOverlayMaxImageSize();
+    FillBytes(g_overlay_image_base, 0xa5, overlay_max_image_size);
+    const int bytes_read = FSReadFile(&file, g_overlay_image_base, overlay_max_image_size);
     FSCloseFile(&file);
 
     if (bytes_read <= 0) {
@@ -637,6 +977,10 @@ bool LoadOverlayImage(uint32_t *out_bytes_read) {
 }
 
 bool ValidateOverlayHeader(const ModOverlayHeader *header, uint32_t bytes_read) {
+    const uint32_t overlay_max_image_size = GetOverlayMaxImageSize();
+    const uint32_t overlay_max_bss_size = GetOverlayMaxBssSize();
+    const uint32_t overlay_total_region_size = GetOverlayTotalRegionSize();
+
     if (header->magic != kModOverlayMagic) {
         return false;
     }
@@ -646,7 +990,7 @@ bool ValidateOverlayHeader(const ModOverlayHeader *header, uint32_t bytes_read) 
     if (header->header_size < sizeof(ModOverlayHeader)) {
         return false;
     }
-    if (header->image_size < header->header_size || header->image_size > kOverlayMaxImageSize) {
+    if (header->image_size < header->header_size || header->image_size > overlay_max_image_size) {
         return false;
     }
     if (header->image_size > bytes_read) {
@@ -658,11 +1002,11 @@ bool ValidateOverlayHeader(const ModOverlayHeader *header, uint32_t bytes_read) 
     if (header->exports_offset >= header->image_size) {
         return false;
     }
-    if (header->bss_size > kOverlayMaxBssSize) {
+    if (header->bss_size > overlay_max_bss_size) {
         return false;
     }
     const uint32_t total_size = header->image_size + header->bss_size;
-    if (total_size < header->image_size || total_size > kOverlayTotalRegionSize) {
+    if (total_size < header->image_size || total_size > overlay_total_region_size) {
         return false;
     }
 
@@ -674,7 +1018,7 @@ bool ValidateOverlayHeader(const ModOverlayHeader *header, uint32_t bytes_read) 
 
     const uint32_t payload_size = header->image_size - header->header_size;
     const uint32_t image_crc =
-        ComputeCrc32(kOverlayImageBase + header->header_size, payload_size);
+        ComputeCrc32(g_overlay_image_base + header->header_size, payload_size);
     if (image_crc != header->image_crc32) {
         return false;
     }
@@ -684,6 +1028,10 @@ bool ValidateOverlayHeader(const ModOverlayHeader *header, uint32_t bytes_read) 
 
 uint32_t Host_GetRuntimeMode() {
     return static_cast<uint32_t>(g_mod_runtime_mode);
+}
+
+uint32_t Host_GetMemoryTier() {
+    return static_cast<uint32_t>(g_mod_runtime_memory_tier);
 }
 
 uint32_t Host_IsDsiModeEnabled() {
@@ -698,16 +1046,36 @@ void *Host_SpawnOriginal(uint16_t object_id, void *parent_node, uint32_t setting
 void SetupHostApi() {
     g_host_api.abi_version = kModOverlayAbiVersion;
     g_host_api.host_flags = 0;
+    if (ModRuntime_IsEnhancedMemoryModeEnabled()) {
+        g_host_api.host_flags |= kModOverlayHostFlagEnhancedMemory;
+    }
+    if (ModRuntime_IsExpansionPakModeEnabled()) {
+        g_host_api.host_flags |= kModOverlayHostFlagExpansionPak;
+    }
+    if (ModRuntime_IsDsiModeEnabled()) {
+        g_host_api.host_flags |= kModOverlayHostFlagDsi;
+    }
     g_host_api.crc32 = ComputeCrc32;
     g_host_api.spawn_original = Host_SpawnOriginal;
     g_host_api.get_runtime_mode = Host_GetRuntimeMode;
+    g_host_api.get_memory_tier = Host_GetMemoryTier;
     g_host_api.is_dsi_mode_enabled = Host_IsDsiModeEnabled;
-    g_host_api.reserved[0] = kOverlayHeapBaseAddr;
-    g_host_api.reserved[1] = kOverlayGuardBaseAddr - kOverlayHeapBaseAddr;
-    g_host_api.reserved[2] = 0;
+    g_host_api.reserved[0] =
+        (g_active_memory_layout != nullptr) ? static_cast<uint32_t>(g_active_memory_layout->overlay_heap_base_addr) : 0u;
+    g_host_api.reserved[1] =
+        (g_active_memory_layout != nullptr)
+            ? static_cast<uint32_t>(g_active_memory_layout->overlay_guard_base_addr -
+                                    g_active_memory_layout->overlay_heap_base_addr)
+            : 0u;
+    g_host_api.reserved[2] = static_cast<uint32_t>(g_mod_runtime_memory_tier);
 }
 
 bool TryLoadAndStartOverlay() {
+    if (g_active_memory_layout == nullptr || g_overlay_image_base == nullptr) {
+        g_debug_state.overlay_skip_reason = kOverlaySkipNoEnhancedMemory;
+        return false;
+    }
+
     g_debug_state.overlay_skip_reason = kOverlaySkipNone;
     g_debug_state.overlay_load_attempts++;
     uint32_t bytes_read = 0;
@@ -717,25 +1085,25 @@ bool TryLoadAndStartOverlay() {
         return false;
     }
 
-    const auto *header = reinterpret_cast<const ModOverlayHeader *>(kOverlayImageBase);
+    const auto *header = reinterpret_cast<const ModOverlayHeader *>(g_overlay_image_base);
     if (!ValidateOverlayHeader(header, bytes_read)) {
         g_debug_state.overlay_skip_reason = kOverlaySkipHeaderInvalid;
         g_debug_state.overlay_load_failures++;
         return false;
     }
 
-    ZeroBytes(kOverlayImageBase + header->image_size, header->bss_size);
+    ZeroBytes(g_overlay_image_base + header->image_size, header->bss_size);
 
     const uint32_t total_size = header->image_size + header->bss_size;
-    DCFlushRange(kOverlayImageBase, static_cast<int>(total_size));
+    DCFlushRange(g_overlay_image_base, static_cast<int>(total_size));
     DCWaitWriteBufferEmpty();
-    ICInvalidateRange(kOverlayImageBase, static_cast<int>(header->image_size));
+    ICInvalidateRange(g_overlay_image_base, static_cast<int>(header->image_size));
 
-    uintptr_t entry_addr = kOverlayImageBaseAddr + (header->entry_offset & ~1u);
+    uintptr_t entry_addr = g_active_memory_layout->overlay_image_base_addr + (header->entry_offset & ~1u);
     entry_addr |= (header->entry_offset & 1u);
     auto entry_fn = reinterpret_cast<ModOverlayEntryFn>(entry_addr);
 
-    g_overlay_exports = reinterpret_cast<ModOverlayExports *>(kOverlayImageBase + header->exports_offset);
+    g_overlay_exports = reinterpret_cast<ModOverlayExports *>(g_overlay_image_base + header->exports_offset);
     if (!entry_fn(&g_host_api)) {
         g_debug_state.overlay_skip_reason = kOverlaySkipEntryFailed;
         g_overlay_exports = nullptr;
@@ -767,13 +1135,27 @@ void NotifyOverlaySceneChange(uint16_t scene_id) {
 
 }  // namespace
 
+ModRuntimeMemoryTier ModRuntime_GetMemoryTier() {
+    return g_mod_runtime_memory_tier;
+}
+
 bool ModRuntime_IsDsiModeEnabled() {
     return g_mod_runtime_mode == ModRuntimeMode::DSI_MODE_NO_OVERLAY ||
            g_mod_runtime_mode == ModRuntimeMode::DSI_MODE_OVERLAY_READY;
 }
 
+bool ModRuntime_IsExpansionPakModeEnabled() {
+    return g_mod_runtime_mode == ModRuntimeMode::EXPANSION_MODE_NO_OVERLAY ||
+           g_mod_runtime_mode == ModRuntimeMode::EXPANSION_MODE_OVERLAY_READY;
+}
+
+bool ModRuntime_IsEnhancedMemoryModeEnabled() {
+    return ModRuntime_IsDsiModeEnabled() || ModRuntime_IsExpansionPakModeEnabled();
+}
+
 bool ModRuntime_IsOverlayReady() {
-    return g_mod_runtime_mode == ModRuntimeMode::DSI_MODE_OVERLAY_READY;
+    return g_mod_runtime_mode == ModRuntimeMode::DSI_MODE_OVERLAY_READY ||
+           g_mod_runtime_mode == ModRuntimeMode::EXPANSION_MODE_OVERLAY_READY;
 }
 
 bool ModRuntime_IsDsiCompatModeLikely() {
@@ -786,6 +1168,14 @@ bool ModRuntime_IsCompatUnlockEnabled() {
 
 bool ModRuntime_IsExtraRamPoolReady() {
     return g_extra_ram_pool_ready;
+}
+
+uintptr_t ModRuntime_GetExtraRamBase() {
+    return g_extra_ram_pool_base_addr;
+}
+
+uint32_t ModRuntime_GetExtraRamSize() {
+    return g_extra_ram_pool_size;
 }
 
 void *ModRuntime_ExtraRamAlloc(uint32_t size, uint32_t alignment) {
@@ -866,7 +1256,7 @@ void *ModRuntime_TryResizeExtraRamTail(void *ptr, uint32_t new_size) {
 }
 
 bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_data, uint32_t source_size,
-                                     ModRuntimeDsiFileLoadResult *out_result) {
+                                     ModRuntimeExtraRamFileLoadResult *out_result) {
     if (out_result == nullptr) {
         return false;
     }
@@ -904,8 +1294,8 @@ bool ModRuntime_TryPromoteLoadedFile(uint32_t ext_file_id, const void *source_da
     return true;
 }
 
-bool ModRuntime_TryLoadFileToExtraRam(uint32_t ext_file_id, ModRuntimeDsiFilePolicy policy,
-                                      ModRuntimeDsiFileLoadResult *out_result) {
+bool ModRuntime_TryLoadFileToExtraRam(uint32_t ext_file_id, ModRuntimeExtraRamFilePolicy policy,
+                                      ModRuntimeExtraRamFileLoadResult *out_result) {
     if (out_result == nullptr) {
         return false;
     }
@@ -991,7 +1381,7 @@ bool ModRuntime_LoadValidatedFile(const char *path, uint32_t expected_magic, uin
         void *file = cached_file;
         if (g_extra_ram_pool_ready) {
             const uint32_t file_size = FS::getFileSize(ext_file_id);
-            ModRuntimeDsiFileLoadResult promoted = {};
+            ModRuntimeExtraRamFileLoadResult promoted = {};
             if (file_size != 0u &&
                 ModRuntime_TryPromoteLoadedFile(ext_file_id, cached_file, file_size, &promoted)) {
                 if (HasExpectedMagic(promoted.data, expected_magic)) {
@@ -1081,6 +1471,14 @@ bool ModRuntime_TryLateCompatEnable() {
     return false;
 }
 
+void *ModRuntime_TryReservePreBootstrapExtraRam(uint32_t size, uint32_t alignment) {
+    if (g_bootstrap_finished || size == 0u) {
+        return nullptr;
+    }
+
+    return ReserveExpansionPakTop(size, alignment);
+}
+
 extern "C" ncp_hook(0x02005044) void ModRuntime_BootstrapHook() {
     g_debug_state.bootstrap_calls++;
     g_debug_state.bootstrap_seen++;
@@ -1094,8 +1492,8 @@ extern "C" ncp_hook(0x02005044) void ModRuntime_BootstrapHook() {
 
     if (!DetectAndEnableDsiExtraRam()) {
         ResetExtraRamPoolState();
-        g_debug_state.overlay_skip_reason = kOverlaySkipNotTwl;
-        g_mod_runtime_mode = ModRuntimeMode::NDS_OR_DSI_DISABLED;
+        g_debug_state.overlay_skip_reason = kOverlaySkipNoEnhancedMemory;
+        g_mod_runtime_mode = ModRuntimeMode::NDS_MODE;
         g_debug_state.nds_fallback_boots++;
         g_debug_state.last_mode_snapshot = g_mod_runtime_mode;
 
@@ -1127,22 +1525,37 @@ extern "C" ncp_hook(0x02005044) void ModRuntime_BootstrapHook() {
 
     if (!g_logged_detect_result) {
         g_logged_detect_result = true;
-        LogTwlGateSnapshot("PASS");
-        Log() << "[MODRUNTIME] DSi detect OK"
-              << " A9ROM=" << Log::Hex << g_debug_state.raw_scfg_a9rom
-              << " EXT9=" << g_debug_state.raw_scfg_ext9 << Log::Dec
-              << " RAM_LIMIT=" << g_debug_state.raw_scfg_ext9_ram_limit
-              << " SNDEXCNT=" << Log::Hex << g_debug_state.raw_sndexcnt << Log::Dec
-              << " DSI_HINT=" << g_debug_state.dsi_console_hint
-              << " DSI_COMPAT_LIKELY=" << g_debug_state.dsi_compat_mode_likely
-              << " MPU_R1=" << Log::Hex << g_debug_state.mpu_mainram_after << Log::Dec
-              << "\n";
+        if (g_mod_runtime_memory_tier == ModRuntimeMemoryTier::DSI) {
+            LogTwlGateSnapshot("PASS");
+            Log() << "[MODRUNTIME] DSi detect OK"
+                  << " A9ROM=" << Log::Hex << g_debug_state.raw_scfg_a9rom
+                  << " EXT9=" << g_debug_state.raw_scfg_ext9 << Log::Dec
+                  << " RAM_LIMIT=" << g_debug_state.raw_scfg_ext9_ram_limit
+                  << " SNDEXCNT=" << Log::Hex << g_debug_state.raw_sndexcnt << Log::Dec
+                  << " DSI_HINT=" << g_debug_state.dsi_console_hint
+                  << " DSI_COMPAT_LIKELY=" << g_debug_state.dsi_compat_mode_likely
+                  << " MPU_R1=" << Log::Hex << g_debug_state.mpu_mainram_after << Log::Dec
+                  << "\n";
+        } else {
+            LogTwlGateSnapshot("FAIL");
+            Log() << "[MODRUNTIME] Expansion Pak detect OK"
+                  << " EXMEMCNT=" << Log::Hex << g_debug_state.raw_exmemcnt
+                  << " UNLOCK=" << g_debug_state.raw_slot2_unlock << Log::Dec
+                  << " POOL_BASE=" << Log::Hex << g_extra_ram_pool_base_addr
+                  << " POOL_SIZE=" << Log::Dec << g_extra_ram_pool_size
+                  << "\n";
+        }
     }
 
-    g_debug_state.dsi_detected_boots++;
+    if (g_mod_runtime_memory_tier == ModRuntimeMemoryTier::DSI) {
+        g_debug_state.dsi_detected_boots++;
+        g_mod_runtime_mode = ModRuntimeMode::DSI_MODE_NO_OVERLAY;
+    } else {
+        g_debug_state.expansion_detected_boots++;
+        g_mod_runtime_mode = ModRuntimeMode::EXPANSION_MODE_NO_OVERLAY;
+    }
     g_debug_state.overlay_skip_reason = kOverlaySkipNone;
-    g_mod_runtime_mode = ModRuntimeMode::DSI_MODE_NO_OVERLAY;
-    if (InitializeExtraRamPool()) {
+    if (g_extra_ram_pool_ready || InitializeExtraRamPool()) {
         Log() << "[MODRUNTIME] Extra RAM pool ready base=" << Log::Hex
               << g_extra_ram_pool_base_addr << " size=" << g_extra_ram_pool_size
               << " first_alloc_addr=deferred" << Log::Dec << "\n";
@@ -1153,8 +1566,18 @@ extern "C" ncp_hook(0x02005044) void ModRuntime_BootstrapHook() {
     }
 
     SetupHostApi();
+    if (g_mod_runtime_memory_tier == ModRuntimeMemoryTier::EXPANSION_PAK &&
+        !EnableExpansionOverlayExecution()) {
+        g_debug_state.overlay_skip_reason = kOverlaySkipEntryFailed;
+        Log() << "[MODRUNTIME][OVERLAY] Expansion overlay execution permissions unavailable;"
+                 " staying in memory-only mode.\n";
+        g_debug_state.last_mode_snapshot = g_mod_runtime_mode;
+        return;
+    }
     if (TryLoadAndStartOverlay()) {
-        g_mod_runtime_mode = ModRuntimeMode::DSI_MODE_OVERLAY_READY;
+        g_mod_runtime_mode = (g_mod_runtime_memory_tier == ModRuntimeMemoryTier::DSI)
+                                 ? ModRuntimeMode::DSI_MODE_OVERLAY_READY
+                                 : ModRuntimeMode::EXPANSION_MODE_OVERLAY_READY;
         Log() << "[MODRUNTIME][OVERLAY] Overlay ready exports=" << Log::Hex
               << reinterpret_cast<uintptr_t>(g_overlay_exports) << Log::Dec << "\n";
     } else {

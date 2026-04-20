@@ -5,12 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$ROOT_DIR/build/ordinary_overlay"
 SRC="$ROOT_DIR/source/ports/Ordinary/ordinary_overlay/ordinary_overlay.cpp"
 LDSCRIPT="$ROOT_DIR/tools/ordinary_overlay.ld"
-ELF="$BUILD_DIR/ordinary_overlay.elf"
 OBJ="$BUILD_DIR/ordinary_overlay.o"
-MAP="$BUILD_DIR/ordinary_overlay.map"
-PAYLOAD="$ROOT_DIR/build/ordinary_overlay_payload.bin"
-OUT_BIN="$ROOT_DIR/nitrofs/z_new/mod/ordinaryovl.bin"
-OUT_COMPAT="$ROOT_DIR/nitrofs/z_new/mod/modovl.bin"
 ENV_FILE="$ROOT_DIR/build/ordinary_overlay_payload.env"
 
 CXX="${ARM_NONE_EABI_CXX:-arm-none-eabi-g++}"
@@ -39,49 +34,103 @@ mkdir -p "$BUILD_DIR"
   -Os \
   -o "$OBJ"
 
-"$CXX" \
-  -nostdlib \
-  -Wl,-T,"$LDSCRIPT" \
-  -Wl,-Map,"$MAP" \
-  -Wl,--gc-sections \
-  -o "$ELF" \
-  "$OBJ"
+build_variant() {
+  local variant="$1"
+  local load_addr="$2"
+  local payload="$3"
+  local packed="$4"
+  local compat="${5:-}"
 
-"$OBJCOPY" -O binary "$ELF" "$PAYLOAD"
+  local elf="$BUILD_DIR/ordinary_overlay_${variant}.elf"
+  local map="$BUILD_DIR/ordinary_overlay_${variant}.map"
+  local variant_ldscript="$BUILD_DIR/ordinary_overlay_${variant}.ld"
 
-entry_addr_hex="$("$NM" -g "$ELF" | awk '/ OrdinaryOverlay_Entry$/{print $1}')"
-exports_addr_hex="$("$NM" -g "$ELF" | awk '/ g_ordinary_exports$/{print $1}')"
-if [[ -z "$entry_addr_hex" || -z "$exports_addr_hex" ]]; then
-  echo "Failed to resolve required overlay symbols from ELF." >&2
-  exit 1
-fi
+  sed "s/__ORDINARY_OVERLAY_LOAD_ADDR__/$load_addr/g" "$LDSCRIPT" > "$variant_ldscript"
 
-payload_base=0x02800020
-entry_offset=$((16#$entry_addr_hex - payload_base))
-exports_offset=$((16#$exports_addr_hex - payload_base))
-bss_size="$("$SIZE" -A "$ELF" | awk '$1==".bss"{print $2+0}')"
+  "$CXX" \
+    -nostdlib \
+    -Wl,-T,"$variant_ldscript" \
+    -Wl,-Map,"$map" \
+    -Wl,--gc-sections \
+    -o "$elf" \
+    "$OBJ"
 
-python3 "$ROOT_DIR/tools/pack_mod_overlay.py" \
-  --payload "$PAYLOAD" \
-  --out "$OUT_BIN" \
-  --entry-offset "$entry_offset" \
-  --exports-offset "$exports_offset" \
-  --bss-size "$bss_size" \
-  --abi-version 1
+  "$OBJCOPY" -O binary "$elf" "$payload"
 
-# Keep compatibility with current runtime default path.
-cp "$OUT_BIN" "$OUT_COMPAT"
+  local entry_addr_hex
+  local exports_addr_hex
+  entry_addr_hex="$("$NM" -g "$elf" | awk '/ OrdinaryOverlay_Entry$/{print $1}')"
+  exports_addr_hex="$("$NM" -g "$elf" | awk '/ g_ordinary_exports$/{print $1}')"
+  if [[ -z "$entry_addr_hex" || -z "$exports_addr_hex" ]]; then
+    echo "Failed to resolve required overlay symbols from ELF for $variant." >&2
+    exit 1
+  fi
+
+  local payload_base
+  payload_base=$((load_addr))
+  local entry_offset
+  local exports_offset
+  local bss_size
+  entry_offset=$((16#$entry_addr_hex - payload_base))
+  exports_offset=$((16#$exports_addr_hex - payload_base))
+  bss_size="$("$SIZE" -A "$elf" | awk '$1==".bss"{print $2+0}')"
+
+  python3 "$ROOT_DIR/tools/pack_mod_overlay.py" \
+    --payload "$payload" \
+    --out "$packed" \
+    --entry-offset "$entry_offset" \
+    --exports-offset "$exports_offset" \
+    --bss-size "$bss_size" \
+    --abi-version 1
+
+  if [[ -n "$compat" ]]; then
+    cp "$packed" "$compat"
+  fi
+
+  local variant_prefix
+  case "$variant" in
+    dsi) variant_prefix="DSI" ;;
+    expansion) variant_prefix="EXPANSION" ;;
+    *)
+      echo "Unknown overlay variant: $variant" >&2
+      exit 1
+      ;;
+  esac
+
+  printf -v "${variant_prefix}_ENTRY_OFFSET_HEX" '0x%X' "$entry_offset"
+  printf -v "${variant_prefix}_EXPORTS_OFFSET_HEX" '0x%X' "$exports_offset"
+  printf -v "${variant_prefix}_BSS_SIZE" '%u' "$bss_size"
+}
+
+DSI_PAYLOAD="$ROOT_DIR/build/ordinary_overlay_payload.bin"
+DSI_PACKED="$ROOT_DIR/nitrofs/z_new/mod/ordinaryovl.bin"
+DSI_COMPAT="$ROOT_DIR/nitrofs/z_new/mod/modovl.bin"
+EXP_PAYLOAD="$ROOT_DIR/build/ordinary_overlay_payload_expansion.bin"
+EXP_PACKED="$ROOT_DIR/nitrofs/z_new/mod/ordinaryovl_expansion.bin"
+
+build_variant "dsi" 0x02800020 "$DSI_PAYLOAD" "$DSI_PACKED" "$DSI_COMPAT"
+build_variant "expansion" 0x09000020 "$EXP_PAYLOAD" "$EXP_PACKED"
 
 cat > "$ENV_FILE" <<EOF
-MODOVL_ENTRY_OFFSET=$entry_offset
-MODOVL_EXPORTS_OFFSET=$exports_offset
-MODOVL_BSS_SIZE=$bss_size
+MODOVL_ENTRY_OFFSET=${DSI_ENTRY_OFFSET_HEX}
+MODOVL_EXPORTS_OFFSET=${DSI_EXPORTS_OFFSET_HEX}
+MODOVL_BSS_SIZE=${DSI_BSS_SIZE}
+DSI_MODOVL_ENTRY_OFFSET=${DSI_ENTRY_OFFSET_HEX}
+DSI_MODOVL_EXPORTS_OFFSET=${DSI_EXPORTS_OFFSET_HEX}
+DSI_MODOVL_BSS_SIZE=${DSI_BSS_SIZE}
+EXPANSION_MODOVL_ENTRY_OFFSET=${EXPANSION_ENTRY_OFFSET_HEX}
+EXPANSION_MODOVL_EXPORTS_OFFSET=${EXPANSION_EXPORTS_OFFSET_HEX}
+EXPANSION_MODOVL_BSS_SIZE=${EXPANSION_BSS_SIZE}
 EOF
 
-echo "Built ordinary overlay payload:"
-echo "  payload: $PAYLOAD"
-echo "  packed : $OUT_BIN"
-echo "  compat : $OUT_COMPAT"
-echo "  env    : $ENV_FILE"
-printf "  entry_offset=0x%X exports_offset=0x%X bss_size=%u\n" \
-  "$entry_offset" "$exports_offset" "$bss_size"
+echo "Built ordinary overlay payloads:"
+printf "  dsi payload      : %s\n" "$DSI_PAYLOAD"
+printf "  dsi packed       : %s\n" "$DSI_PACKED"
+printf "  dsi compat       : %s\n" "$DSI_COMPAT"
+printf "  expansion payload: %s\n" "$EXP_PAYLOAD"
+printf "  expansion packed : %s\n" "$EXP_PACKED"
+printf "  env              : %s\n" "$ENV_FILE"
+printf "  dsi entry_offset=%s exports_offset=%s bss_size=%u\n" \
+  "$DSI_ENTRY_OFFSET_HEX" "$DSI_EXPORTS_OFFSET_HEX" "$DSI_BSS_SIZE"
+printf "  expansion entry_offset=%s exports_offset=%s bss_size=%u\n" \
+  "$EXPANSION_ENTRY_OFFSET_HEX" "$EXPANSION_EXPORTS_OFFSET_HEX" "$EXPANSION_BSS_SIZE"

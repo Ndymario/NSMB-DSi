@@ -64,10 +64,6 @@ bool Chaser::onPrepareResources(){
 
     *cachedFile = nsbtxFile;
     *cachedExt = extFileId;
-    if (!PrepareStandaloneNsbtx(nsbtxFile)) {
-        Log() << "[ORDINARY][Chaser] Failed to setup texture resource path="
-              << texPath << "\n";
-    }
     Log() << "[ORDINARY][Chaser] Loaded texture path=" << texPath << " extFileId=" << extFileId << "\n";
     texID = 0;
 	spookyNsbtx.setup(nsbtxFile, Vec2(64, 64), Vec2(0, 0), 0, 0);
