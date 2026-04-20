@@ -5,8 +5,11 @@ Some black magic to get NSMB to tap into the DSi's extra resources.
 [!Warning]
 > Currently, the patched ROM does not boot on actual hardware! You will need to use a patched version of melonDS to actually use this mod.
 
+[!Warning]
+> This project is in a very early state, there be dragons!
+
 [!NOTE]
-> This project was "vibe coded" lmao. If someone can make this work better, by all means please do! I was able to feed AI several resources to make the resulting code much better than just "hey, make DSi mode work".
+> This project was "vibe coded" lmao. Despite this, I think the end result is still worth sharing. If you think you can make it work better, by all means open a PR! The AGENTS.md has been crafted to be geared towards NSMB DS modding, so agents are able to give more reliable results.
 
 ## Runtime hooks
 
@@ -383,8 +386,6 @@ Current translated custom IDs:
 
 Ordinary NitroFS assets are copied into this repo under:
 - `nitrofs/banner.bin`
-- `nitrofs/course/H12_1.bin`
-- `nitrofs/course/H12_1_bgdat.bin`
 - `nitrofs/z_new/Ordinary/actors/*`
 - `nitrofs/z_new/dummy.txt`
 
