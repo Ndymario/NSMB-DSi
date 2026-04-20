@@ -2,13 +2,13 @@
 
 Some black magic to get NSMB to tap into the DSi's extra resources.
 
-[!Warning]
-> Currently, the patched ROM does not boot on actual hardware! You will need to use a patched version of melonDS to actually use this mod.
+> [!Warning]
+> Currently, the patched ROM does not boot on actual hardware! You will need to use a patched version of melonDS to actually use this mod. There are instructions in this README on what code to change.
 
-[!Warning]
+> [!Warning]
 > This project is in a very early state, there be dragons!
 
-[!NOTE]
+> [!NOTE]
 > This project was "vibe coded" lmao. Despite this, I think the end result is still worth sharing. If you think you can make it work better, by all means open a PR! The AGENTS.md has been crafted to be geared towards NSMB DS modding, so agents are able to give more reliable results.
 
 ## Runtime hooks
@@ -348,12 +348,6 @@ if (dsi && header.DSiRegionMask == RegionMask::NoRegion)
         dsi = false;
     }
 }
-```
-
-To inspect the exact local patch from the reference tree:
-
-```bash
-git -C /Users/ndymario/Programming/Cpp/melonDS diff -- src/DSi.cpp src/DSi.h src/CP15.cpp src/NDS.cpp src/NDSCart.cpp
 ```
 
 ## Test overlay payload
