@@ -26,7 +26,6 @@ namespace Lighting {
 
 	ncp_jump(0x020a3b24,0)
 	void setLightingFromProfile(u32 profileID) {
-
 		currentProfileID = profileID;
 		
 		u32 n = 0;
