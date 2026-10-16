@@ -1,0 +1,60 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/TheGameratorT/NCPatcher/main/schema/ncpatcher.schema.json
+#
+# Development project for the DSi module. It builds a vanilla US ROM with only
+# modules/dsi enabled, so anything that changes in the game is this module's doing.
+# To use the module in your own project, see docs/integrating.md.
+version: 2
+
+rom:
+  file: rom.nds
+  output: build/nsmb-dsi.nds
+  backup: backup
+
+toolchain: arm-none-eabi-
+
+defines: [SDK_GCC, SDK_FINALROM]
+flags:
+  common: [-masm-syntax-unified, -mno-unaligned-access, -mfloat-abi=soft, -mabi=aapcs]
+  c: [-Os, -fno-short-enums, -fomit-frame-pointer, -ffast-math, -fno-builtin, -nostdlib, -nodefaultlibs, -nostartfiles]
+  cpp: [-Os, -fno-short-enums, -fomit-frame-pointer, -ffast-math, -fno-builtin, -nostdlib, -nodefaultlibs, -nostartfiles, -fno-rtti, -fno-exceptions, -std=c++23]
+  asm: [-Os, -x, assembler-with-cpp, -fomit-frame-pointer]
+  ld: [-lgcc, -lc, -lstdc++, --use-blx]
+
+modules:
+  dir: modules
+  dump: build/generated/modules.json
+  enabled:
+    - dsi
+
+hooks:
+  # NCPatcher writes NTR headers only; this turns the output into a DSi-enhanced
+  # (TWL) ROM so DSi-mode loaders boot it with SCFG unlocked and 16MB mapped.
+  - name: Make the ROM DSi-enhanced
+    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}"'
+    when: post-build
+
+targets:
+  arm7:
+    build: build/arm7
+    arena-lo: 0x037FCF78
+    defines: [SDK_ARM7]
+    includes: ["${env.NSMB_NITRO_ROOT}/include"]
+    flags:
+      common: [-march=armv4t, -mtune=arm7tdmi]
+    regions:
+      - dest: main
+        sources: "${env.NSMBREF_ROOT}/symbols7.c"
+
+  arm9:
+    build: build/arm9
+    arena-lo: 0x02065F10
+    region-catalog: ${env.NSMBREF_ROOT}/overlays9.yaml
+    includes: ["${env.NSMB_NITRO_ROOT}/include", "${env.NSMBREF_ROOT}/include"]
+    defines: [SDK_ARM9, arm9_start=0x021901E0]
+    flags:
+      common: [-march=armv5te, -mtune=arm946e-s]
+      c: [-mthumb-interwork]
+      cpp: [-mthumb-interwork]
+    regions:
+      - dest: main
+        sources: "${env.NSMBREF_ROOT}/symbols9.c"

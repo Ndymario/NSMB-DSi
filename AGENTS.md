@@ -1,109 +1,95 @@
-# AGENTS.md — NSMB DS Code Modding (NCPatcher / NSMB-Docker)
+# AGENTS.md — NSMB-DSi (NCPatcher v2 module)
 
-This workspace is for **New Super Mario Bros. (Nintendo DS)** code mods using  
-**NSMB-Docker + NCPatcher**.
+This repository is **one NCPatcher v2 module**, `modules/dsi`, that lets
+**New Super Mario Bros. (Nintendo DS, US)** use DSi hardware (16MB RAM, 134MHz
+ARM9, NWRAM) when booted in DSi mode, and does nothing on a DS. Read
+`README.md` and `docs/how-it-works.md` before changing anything: they hold the
+memory map, the boot sequence and every hook address with its justification.
 
-Agents must treat this repo as **code-first**: ARM9 hooks, jumps, patches, and
-NitroFS file replacement. Do not commit ROMs or attempt manual binary edits.
+Treat this repo as **code-first**: ARM9/ARM7 hooks built by NCPatcher, plus
+one post-build header tool. Never commit ROMs, never hand-edit binaries.
 
 ---
 
 ## Core Principles (Read First)
-- **All builds go through NSMB-Docker**
-- **All code is compiled with NCPatcher**
-- **Addresses, hooks, and jumps must be verified in Ghidra**
+- **All builds go through NCPatcher v2** (`tools/ncp.sh build`), pinned by `tools/bootstrap.sh`
+- **Every change is verified with the harness** (`python3 tools/harness/run.py --check`)
+- **Addresses, hooks, and jumps must be verified** against the clean binaries
+  (Ghidra, or disassembly of the clean US ARM9/ARM7) before patching
+- **DS mode must stay vanilla.** Every DSi-only path is gated on runtime detection
 - No ROMs, no raw base-game assets committed
 - Small, deterministic changes only
 
-If something is unclear, **do not guess offsets** — consult Ghidra.
+If something is unclear, **do not guess offsets**.
 
 ---
 
-## Toolchain Overview
+## Toolchain
 
-### Build System
-- **NSMB-Docker** is the canonical build environment
-- Under the hood:
-  - Uses **NCPatcher** to compile and inject code
-  - Uses a clean ROM stored in a persistent Docker volume
-  - Handles NitroSDK conversion automatically
+| Piece | Where | Notes |
+|---|---|---|
+| NCPatcher v2 | `.deps/ncpatcher/bin/ncpatcher` (run via `tools/ncp.sh`) | Pinned commit in `tools/bootstrap.sh` (upstream branch `ncp_v2`) |
+| NSMB-Code-Reference | `.deps/NSMB-Code-Reference` | Headers, `symbols9.c`/`symbols7.c`, `overlays9.yaml` region catalog |
+| Nitro SDK headers | `.deps/nitrosdk/include` | Converted with NSMB-Code-Template's `convert_sdk.py`; never committed |
+| `arm-none-eabi` GCC 12+ | `PATH` | |
+| melonDS 1.1 (stock) + harness | `.deps/melonDS`, `.deps/harness-build/harness` | Headless verification, `tools/harness/` |
+| melonDS app | `/Applications/melonDS.app` | Manual play; DSi mode needs DSi BIOS/firmware/NAND and direct boot |
 
-### Emulator
-- **melonDS**
-```bash
-/Applications/melonDS.app/Contents/MacOS/melonDS final.nds
-```
+`.ncpatcher.env` (written by bootstrap, gitignored) sets `NSMBREF_ROOT` and
+`NSMB_NITRO_ROOT` for this project only. **NSMB-Docker and `ncpatcher.json`
+are obsolete here; do not reintroduce them.** The old project (overlay
+runtime, Ordinary port, patched melonDS) lives at tag `legacy-v0` and must not
+be revived.
 
----
-
-## Canonical Build Command (Required)
-
-This is the *only* supported build command:
+### Build and verify (the only supported flow)
 
 ```bash
-docker run --rm -it \
-  -v ./source:/app/source \
-  -v ./nitrofs:/app/nitrofs \
-  -v "$PWD:/workspace" \
-  -v nsmb-data:/data \
-  nsmb-docker
+tools/bootstrap.sh --nitro <dir with nitro.h> --harness   # once, or after bumping pins
+tools/ncp.sh build                                        # -> build/nsmb-dsi.nds (DSi-enhanced)
+python3 tools/harness/run.py --check                      # DS + DSi runs, asserts invariants
 ```
 
-**Never invent alternate build steps.**
+`--check` boots the ROM in DS and DSi mode, plays into World 1-1, and reads the
+`Report` component's data out of emulated RAM. Look at
+`build/harness/*_sheet.png` as well as the verdict. Other useful commands:
+`tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
+`python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
+(`--dump F:ADDR:LEN`, `--dump7`, `--touch`, `--press`, `--shot`).
 
 ---
 
-## Repository Layout (Host)
+## Repository Layout
 
 ```
-.
-├── source/          # C/C++ source compiled by NCPatcher
-├── nitrofs/         # Files injected into the ROM filesystem
-│   └── z_new/
-│       └── <mod>/   # New files only (do not overwrite base paths here)
-├── arm9.json        # NCPatcher config (optional override)
-├── ncpatcher.json   # NCPatcher config (optional override)
-├── buildrules.txt   # NCPatcher rules (rarely overridden)
-└── AGENTS.md
+modules/dsi/
+  module.yaml           components: Core, Core7, ExtendedRam, FastClock, NWram, Report
+  include/dsi/          public API (dsi.hpp) + shared layouts (shared.hpp, report.hpp, nwram.hpp, twl_regs.hpp)
+  source9/core/         ARM9 boot hooks, detection, clock switching (always built)
+  source9/<component>/  one directory per optional component
+  source7/core/         ARM7 boot hook
+ncpatcher.yaml          dev project: vanilla ROM + this module + post-build header hook
+tools/                  bootstrap.sh, ncp.sh, twl_header.py, harness/
+docs/                   how-it-works.md, integrating.md
 ```
 
-### `source/`
-- ARM9 code mods
-- Hooks, jumps, replacements
-- Uses NCPatcher macros and conventions
-
-### `nitrofs/`
-- File replacement / injection
-- **Replacing files**: mirror original NitroFS path + filename
-- **Adding files**: must go in `z_new/<mod_name>/`
-
----
-
-## Docker Container Layout (Reference)
-
-Inside the container:
-
-```
-/workspace/        # Mounted project root ($PWD)
-/app/              # Working environment
-/app/scripts/      # NSMB-Docker scripts
-/app/arm9.json     # Default ARM9 config
-/app/ncpatcher.json
-/data/             # Persistent volume
-/data/include/     # Converted NitroSDK + Nitro System
-/data/nsmb.nds     # Clean base ROM (never committed)
-/opt/
-├── NCPatcher/              # Built NCPatcher (on PATH)
-└── NSMB-Code-Reference/    # Code template (nsmb.hpp) + symbols (symbols9.x / symbols7.x)
-```
+Module rules (NCPatcher v2): a module declares sources, includes, defines and
+components only. Hooks scripts, `files:`, regions and flags belong to the
+consuming project, which is why the DSi header step is a project post-build
+hook. Components talk to the core through the weak boot-stage functions in
+`source9/core/internal.hpp`; the core calls them in a fixed order. Public API
+lives in `dsi.hpp` and must keep working (returning false/nullptr) when a
+component is switched off.
 
 ---
 
 ## Code Compilation & Patching
 
 ### Compiler
-- **NCPatcher**
-- `ncprt` is **not implemented** — do not reference or rely on it
+- **NCPatcher v2** (`ncp.h` contract 1). Hooked functions need external linkage.
+- `ncp_set_*` variants let one function serve several addresses; two patches at
+  the **same** address (e.g. from two modules) conflict, so check other modules
+  (NSMB co-op hooks ARM7 `0x037FCEEC`) before claiming a site.
+- Runtime patching (`ncprt_*`) exists in v2 but this module does not need it.
 
 
 ### Patch Types (NCPatcher)
@@ -471,10 +457,12 @@ For *every* code change:
    - Address
    - ARM/THUMB mode
    - Call context
-4. Implement the **smallest possible patch**
-5. Build using NSMB-Docker
-6. Test in melonDS
-7. Report:
+4. Implement the **smallest possible patch**, gated on `dsi::state.twl` if it is DSi-only
+5. Build with `tools/ncp.sh build`
+6. Verify with `python3 tools/harness/run.py --check` (and the contact sheets);
+   add a check to `run.py` for any new invariant
+7. Update `docs/how-it-works.md` if a hook, address or memory range changed
+8. Report:
    - What changed
    - Where it hooks
    - Expected behavior
@@ -488,21 +476,22 @@ For *every* code change:
 - ❌ No base-game assets committed
 - ❌ No hex editing without tooling
 - ❌ No guessing offsets
-- ❌ No modifying `/data/` contents directly
+- ❌ No writing to the user's NAND/BIOS dumps (the harness copies the NAND)
+- ❌ No emulator patches: everything must work on stock melonDS
 
-- ✅ Hooks/jumps must reference Ghidra findings
-- ✅ New files go in `nitrofs/z_new/`
-- ✅ Code must build cleanly in Docker
+- ✅ Hooks/jumps must reference verified disassembly (Ghidra or the clean binaries)
+- ✅ New NitroFS files go in `z_new/`
+- ✅ Code must build cleanly and `run.py --check` must pass
 
 ---
 
 ## External References (Authoritative)
 
-- NSMB-Docker  
-  https://github.com/Ndymario/NSMB-Docker
-
-- NCPatcher  
+- NCPatcher (v2 lives on branch `ncp_v2`)  
   https://github.com/TheGameratorT/NCPatcher
+
+- NSMB co-op (reference NCPatcher v2 module project, branch `ncp_v2`)  
+  https://github.com/ShaneDoyle/nsmb-coop
 
 - NSMB Code Patching Reference  
   https://github.com/MammaMiaTeam/NSMB-Code-Reference
@@ -517,13 +506,13 @@ For *every* code change:
 
 Agents have access to **ndspy**, a Python library for reading, inspecting, and modifying
 Nintendo DS ROMs and common DS file formats. This is useful for inspection, extraction,
-and custom tooling outside of NSMB-Docker.
+and custom tooling outside of the NCPatcher build.
 
 Official documentation:
 https://ndspy.readthedocs.io/en/latest/
 
 ndspy operates on ROM files directly and is best used for **analysis, extraction, and
-automation**, not as a replacement for NSMB-Docker’s build pipeline.
+automation**, not as a replacement for the NCPatcher build.
 
 ---
 
@@ -608,7 +597,7 @@ Use ndspy for:
 
 Do **not** use ndspy to:
 - Commit modified ROMs
-- Replace the NSMB-Docker build process
+- Replace the NCPatcher build process
 - Perform manual binary patching
 
 ---
@@ -621,7 +610,7 @@ Do **not** use ndspy to:
 
 ---
 
--## GBATEK — Hardware Reference (NDS / DSi)
+## GBATEK — Hardware Reference (NDS / DSi)
 
 Agents have access to the **GBATEK documentation** locally:
 
@@ -718,115 +707,44 @@ Both must align before patching hardware behavior.
 
 ---
 
--## DSi Mode & Extended RAM (TWL Enhancements)
+## DSi Mode in This Project (verified facts)
 
-This project may target **DSi hardware enhancements** (TWL mode) including:
-- 16MB main RAM (vs 4MB on NTR DS)
-- Faster ARM9 clock (133MHz vs ~67MHz)
-- Additional memory banking control
+Established by the spike and kept true by `run.py --check`. Details and
+reasoning in `docs/how-it-works.md`.
 
-Running on DSi hardware alone does **NOT** automatically grant access to extra RAM.
-The game must explicitly:
-1. Detect DSi hardware at runtime
-2. Configure extended memory mapping
-3. Allocate and manage memory from the extended region
-
----
-
-### Boot Requirements (Important)
-
-To access full DSi hardware behavior:
-
-- The game must be launched in **DSi mode (TWL mode)**.
-- Standard DS cartridge boot will behave as NTR mode unless:
-  - The title is DSi-enhanced, OR
-  - A loader (e.g. nds-bootstrap / custom launcher) enables TWL mode.
-
-Simply patching memory logic without ensuring DSi-mode boot will not expose extended RAM.
-
-Agents must confirm the runtime environment before implementing DSi-specific logic.
-
----
-
-### Runtime DSi Detection
-
-Before using extended RAM, detect DSi hardware.
-
-Detection methods may include:
-- Checking SCFG registers
-- Inspecting memory map behavior
-- Using known hardware identification registers
-
-Do NOT assume DSi presence.
-All extended RAM logic must be gated behind a runtime check.
-
----
-
-### DSi Extended RAM Overview
-
-On DSi hardware:
-
-- Main RAM expands to 16MB at `0x02000000`
-- Memory banking is controlled via:
-  - `SCFG_EXT`
-  - `MBK1–MBK9`
-
-These registers control how WRAM and extended memory are mapped
-into the ARM9 address space.
-
-Before using extended RAM:
-- Confirm mapping registers
-- Ensure memory region is visible
-- Verify no overlap with existing heap or static allocations
-
-Consult **GBATEK (DSi section)** for exact register definitions and bitfields.
-
----
-
-### Using Extended RAM Safely
-
-When enabling extended RAM usage:
-
-1. Perform DSi detection at startup
-2. Configure SCFG / MBK registers if required
-3. Establish a separate allocator for extended RAM
-4. Do NOT modify the original 4MB heap behavior unless intentional
-5. Ensure fallback behavior exists for NTR hardware
-
-Recommended strategy:
-- Leave original game heap untouched
-- Create a new memory pool in extended RAM
-- Use it for:
-  - Large buffers
-  - Expanded object pools
-  - Custom systems
-  - Additional level data
-
----
-
-### ARM9 vs ARM7 Considerations
-
-- Some memory banks are shared or bank-switched between ARM9 and ARM7
-- Confirm ownership before mapping
-- Never assume exclusive access without verification
-
-Consult GBATEK for:
-- Shared WRAM behavior
-- Bank switching implications
-
----
+- **Boot path:** the ROM is made DSi-enhanced by `tools/twl_header.py` (unit
+  code 02h, DSi extended header, no ARM9i/ARM7i payload, TSC in NDS mode,
+  unsigned). Verified on stock melonDS 1.1 DSi direct boot. Unlaunch, TWiLight
+  Menu++/nds-bootstrap and real hardware are **unverified**; say so when
+  reporting results.
+- **Detection:** ARM9 `SCFG_A9ROM == 1 && SCFG_EXT9.bit31 && RAM limit >= 2`;
+  ARM7 `SCFG_EXT7.bit31 && RAM limit >= 2`. DSi hardware in DS mode is seen
+  only through the ARM7's `SNDEXCNT` (the ARM9 reads it as 0).
+- **NTR assumptions that break in DSi mode, and the fix:**
+  - boot data lives at `0x02FFFxxx`, not `0x027FFxxx`. Both CPUs copy it before
+    their `OS_Init`;
+  - `OS_Init` shrinks MPU region 1 to 4MB. The core re-widens it after `OS_Init`;
+  - the ARM7's RAM-size probe reports "8MB" (value 2), which is harmless.
+- **Hook order on ARM9:** crt0 calls `NitroStartUp`, which runs
+  `App::commonStartup` and `OS_Init`, **before** `NitroMain`. Code that must
+  run first hooks `App::branchToStartup` (`0x020056A8`), not `NitroMain`.
+- **Memory:** the root heap moves to `0x02800000-0x02FFC000`. The only reader of
+  the main arena is `Memory::initRootHeap`; main and all 131 overlays were checked.
+  `0x02400000-0x027E0000` and the old arena become spare heaps. NWRAM-A/B/C maps
+  to the ARM9 at `0x03000000` with region 1 = `0x02000031`.
+- **Shared ARM7->ARM9 block:** `0x027FFA40-0x027FFA5F` (NTR SDK marks
+  `0x027FFA00-0x027FFA7F` unused; co-op uses `0x027FFA7E`).
+- **Clock:** `SCFG_CLK.bit0` is written only from a stub in the ITCM arena with
+  IRQs off (GBATEK requirement).
 
 ### Strict Rules for DSi Enhancements
 
-- ❌ Never write to SCFG / MBK registers without verifying bitfields
-- ❌ Never assume extended RAM is automatically usable
-- ❌ Never break compatibility with NTR hardware unless explicitly required
+- ❌ Never write to SCFG / MBK registers without verifying bitfields in GBATEK
+- ❌ Never assume DSi mode: every DSi path is gated on the core's detection
+- ❌ Never break DS (NTR) behaviour; `--check` asserts DS mode stays vanilla
 
-- ✅ All DSi-specific logic must be runtime-checked
 - ✅ All hardware behavior must be verified in GBATEK
-- ✅ All address changes must be documented
-
----
+- ✅ All address and memory-map changes must be documented in docs/how-it-works.md
 
 ------------------------------------------------------------------------
 
@@ -889,8 +807,6 @@ Do not rely purely on symbol names or assumptions.
 ------------------------------------------------------------------------
 
 ## TODO (Future Expansion)
-- Region-specific address handling
-- Common hook templates
-- Logging / debug strategies
-- Overlay-specific patching rules
-- Code style & naming conventions
+- Verify on Unlaunch, TWiLight Menu++/nds-bootstrap, real DSi/3DS
+- Region-specific address handling (only the US ROM is supported)
+- Build and test alongside NSMB co-op
