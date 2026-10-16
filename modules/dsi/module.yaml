@@ -1,0 +1,59 @@
+id: DSi
+name: NSMB DSi
+description: Lets New Super Mario Bros. use DSi hardware (16MB RAM, 133MHz ARM9, NWRAM) when booted in DSi mode, and does nothing on a DS.
+
+authors:
+  - Ndymario
+
+repo: https://github.com/Ndymario/NSMB-DSi
+
+targets:
+  - arm9:
+      includes: include
+      sources: "source9/**"
+  - arm7:
+      includes: include
+      sources: "source7/**"
+
+components:
+  # Hardware detection, boot-area fixups and the public API in dsi/dsi.hpp.
+  # Every other component builds on it, and other modules may call into it.
+  - Core:
+      target: "!arm9"
+      sources: "source9/core/**"
+
+  - Core7:
+      target: "!arm7"
+      requires: Core
+      sources: "source7/core/**"
+
+  # Moves the root heap into the upper 8MB of DSi RAM and turns the rest into
+  # two spare heaps (DSi::extendedHeap, DSi::lowHeap).
+  - ExtendedRam:
+      target: arm9
+      requires: Core
+      sources: "source9/extram/**"
+      defines:
+        - DSI_ROOT_HEAP_START=0x02800000
+        - DSI_ROOT_HEAP_END=0x02FFC000
+        - DSI_EXT_HEAP_START=0x02400000
+        - DSI_EXT_HEAP_END=0x027E0000
+
+  # ARM9 at 134MHz. Without it the core keeps the NDS clock.
+  - FastClock:
+      target: arm9
+      requires: Core
+      sources: "source9/fastclock/**"
+
+  # Maps the DSi's 768KB of new shared WRAM to the ARM9 as DSi::nwramHeap.
+  - NWram:
+      target: arm9
+      requires: Core
+      sources: "source9/nwram/**"
+
+  # Boot and per-frame figures for tools/harness. Development aid; off in releases.
+  - Report:
+      target: arm9
+      requires: Core
+      sources: "source9/report/**"
+      defines: DSI_REPORT
