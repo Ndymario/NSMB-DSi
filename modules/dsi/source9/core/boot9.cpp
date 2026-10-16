@@ -36,6 +36,9 @@ void DSi_bootArm9()
 	if (!state.twl)
 		return;
 
+	// Keep NITRO behaviour for the hardware the game already uses.
+	twl::io<uint32_t>(twl::SCFG_EXT) = state.scfgExt9 & ~twl::SCFG_EXT9_NITRO_CLEAR;
+
 	// crt0 maps 0x02000000-0x027FFFFF only; the launcher's data sits at 0x02FFFxxx.
 	state.region1 = REGION1_16MB;
 	writeRegion1(state.region1);

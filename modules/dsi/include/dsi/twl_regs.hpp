@@ -39,6 +39,17 @@ constexpr uint32_t SCFG_EXT_RAM_16MB      = 2;
 
 constexpr uint16_t SCFG_A9ROM_TWL         = 0x0001; // DSi BIOS, lower 32K: "DSi console in DSi mode"
 
+// SCFG_EXT bits that change how existing (NITRO) hardware behaves rather than
+// adding new hardware. NTR code was written against the NITRO behaviour, so in
+// DSi mode the module turns these off and keeps only the new resources.
+// ARM9: bits 0-4 revised DMA/geometry/renderer/2D/divider, 7 revised card,
+//       8 extended interrupts, 12 extended LCD, 13 extended VRAM access
+//       (with it, 8-bit VRAM writes take effect; on a DS they are dropped).
+constexpr uint32_t SCFG_EXT9_NITRO_CLEAR  = 0x0000319F;
+// ARM7: bits 0-2 revised DMA/sound DMA/sound, 8 extended interrupts,
+//       9 extended (8MHz) SPI clock, 10 extended sound DMA.
+constexpr uint32_t SCFG_EXT7_NITRO_CLEAR  = 0x00000707;
+
 // SCFG_EXT reads as zero once access is revoked (and always on a DS), so a set
 // access bit means we are in DSi mode with the registers still writable.
 inline bool scfgUnlocked() { return (io<uint32_t>(SCFG_EXT) & SCFG_EXT_ACCESS) != 0; }

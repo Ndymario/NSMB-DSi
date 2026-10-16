@@ -112,7 +112,9 @@ python3 tools/harness/run.py --check
 
 It writes contact sheets and JSON reports to `build/harness/`, and exits non-zero if an invariant
 breaks: DS mode must stay vanilla, DSi mode must get every resource, and the
-DSi-mode music must match the DS-mode music (if numpy is installed).
+DSi-mode music must match the DS-mode music (if numpy is installed), and the
+mode switches between the main game, minigames and Mario vs. Luigi must land
+on the same screens as in DS mode.
 BIOS, firmware and NAND paths are read from your melonDS settings. The NAND is
 copied first, so your dump is never written to.
 

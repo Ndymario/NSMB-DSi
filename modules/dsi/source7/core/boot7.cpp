@@ -27,9 +27,11 @@ void DSi_bootArm7()
 
 	if (twlMode) {
 		twl7 = true;
+		// Keep NITRO behaviour for the hardware the ARM7 code already uses.
+		twl::io<uint32_t>(twl::SCFG_EXT) = ext7 & ~twl::SCFG_EXT7_NITRO_CLEAR;
 		flags |= SHARED_TWL_MODE;
-		mirrorBootArea();
-		flags |= SHARED_BOOT_COPIED;
+		mirrorBootArea(); // no-op after a soft reset, or if the ARM9 got there first
+		flags |= SHARED_BOOT_AREA_OK;
 	}
 
 	blk.sndexcnt = twl::io<uint16_t>(twl::SNDEXCNT);

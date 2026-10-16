@@ -35,6 +35,28 @@ MELONDS_TOML_CANDIDATES = [
 # frame -> keys. Timings are for the US ROM with direct boot.
 SCENARIOS = {
     "title": {"frames": 600, "press": [], "shots": [600]},
+    # Title -> Minigames (touch) -> first minigame category.
+    "minigames": {
+        "frames": 1500,
+        "press": [],
+        "touch": ["620:140,131", "900:128,60", "1150:128,60"],
+        "shots": [700, 800, 950, 1100, 1250, 1500],
+    },
+    # Title -> Minigames -> back -> Mario vs. Luigi: two mode switches, each
+    # an OS_ResetSystem, which DSi mode must survive.
+    "resets": {
+        "frames": 2600,
+        "press": [],
+        "touch": ["620:140,131", "1000:238,175", "1700:140,93"],
+        "shots": [900, 1100, 1300, 1500, 1800, 2000, 2300, 2600],
+    },
+    # Title -> Mario vs. Luigi (touch): the VS menus.
+    "mvsl": {
+        "frames": 1400,
+        "press": [],
+        "touch": ["620:140,93", "950:128,60"],
+        "shots": [700, 800, 900, 1000, 1200, 1400],
+    },
     # Into 1-1 and stand still: a steady, repeatable frame for CPU load figures.
     "bench": {
         "frames": 4300,
@@ -96,6 +118,8 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
            "--wav", str(out / f"{console}.wav")]
     for p in scenario["press"]:
         cmd += ["--press", p]
+    for t in scenario.get("touch", []):
+        cmd += ["--touch", t]
     shots = []
     for f in scenario["shots"]:
         ppm = out / f"{console}_{f:05d}.ppm"
@@ -114,6 +138,7 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
             cmd += ["--nand", str(nand)]
         result = subprocess.run(cmd, capture_output=True, text=True)
 
+    (out / f"{console}.log").write_text(result.stderr)
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
         raise SystemExit(f"harness failed for {console}")
@@ -148,6 +173,30 @@ def check_audio(out: pathlib.Path) -> list:
     return [] if similarity > 0.98 else [f"DSi audio differs from DS (similarity {similarity:.3f})"]
 
 
+def check_resets(args, paths: dict) -> list:
+    """Mode switches (OS_ResetSystem) must land in the same place in DSi mode as in DS mode."""
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return []
+    out = args.out / "resets"
+    out.mkdir(parents=True, exist_ok=True)
+    saved = args.scenario
+    args.scenario = "resets"
+    for console in ["ds", "dsi"]:
+        run(console, args, paths, out)
+    args.scenario = saved
+    problems = []
+    # Settled frames: in the minigame menu, back on the title screen, in the VS menu.
+    for frame in [1100, 2000, 2300, 2600]:
+        a, b = (Image.open(out / f"{c}_{frame:05d}.png") for c in ["ds", "dsi"])
+        differing = sum(1 for px in ImageChops.difference(a, b).getdata() if max(px) > 16)
+        if differing > 256 * 384 // 20:
+            problems.append(f"after a mode switch, DSi frame {frame} differs from DS ({differing} pixels)")
+    print(f"resets: Minigames -> title -> Mario vs. Luigi {'matches DS mode' if not problems else 'DIFFERS'}")
+    return problems
+
+
 def check(console: str, report: dict) -> list:
     """What must hold for every build of the module, per console."""
     arm9, arm7 = report.get("arm9"), report["arm7"]
@@ -164,7 +213,8 @@ def check(console: str, report: dict) -> list:
         for heap in ["extended_heap", "low_heap", "nwram_heap"]:
             expect(arm9[heap]["heap"] == "0x00000000", f"DS run created {heap}")
     else:
-        expect(arm9["twl"] and arm7["flags"] == 7, "DSi run not detected as DSi mode")
+        expect(arm9["twl"] and arm7["flags"] == 7, "DSi run not detected as DSi mode (ARM7 flags should be 7)")
+        expect(arm9["scfg_ext9_now"] == "0x8307C000", "SCFG_EXT9 not reduced to NITRO behaviour + DSi resources")
         expect(arm9["console"], "DSi run not detected as DSi hardware")
         expect(arm9["root_heap"]["heap"] == "0x02800000", "root heap not in upper DSi RAM")
         expect(arm9["root_heap"]["size"] > 8_000_000, "root heap smaller than expected")
@@ -211,7 +261,7 @@ def main() -> int:
                 print(f"  FAIL: {problem}")
                 failed = True
     if args.check:
-        for problem in check_audio(args.out):
+        for problem in check_audio(args.out) + check_resets(args, paths):
             print(f"  FAIL: {problem}")
             failed = True
         print("FAILED" if failed else "all checks passed")

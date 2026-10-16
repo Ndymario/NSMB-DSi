@@ -51,7 +51,9 @@ python3 tools/harness/run.py --check                      # DS + DSi runs, asser
 
 `--check` boots the ROM in DS and DSi mode, plays into World 1-1, and reads the
 `Report` component's data out of emulated RAM. It also compares the title
-music's spectrum between DS and DSi mode (needs numpy). Look at
+music's spectrum between DS and DSi mode (needs numpy). It also replays the
+Minigames → title → Mario vs. Luigi mode switches and compares the frames
+(needs Pillow). Look at
 `build/harness/*_sheet.png` as well as the verdict. Other useful commands:
 `tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
 `python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
@@ -720,7 +722,11 @@ reasoning in `docs/how-it-works.md`.
   only through the ARM7's `SNDEXCNT` (the ARM9 reads it as 0).
 - **NTR assumptions that break in DSi mode, and the fix:**
   - boot data lives at `0x02FFFxxx`, not `0x027FFxxx`. Both CPUs copy it before
-    their `OS_Init`;
+    their `OS_Init`, but **only on a cold boot**: NSMB switches modes with
+    `OS_ResetSystem`, and the reset parameter (`0x027FFC20`) must survive;
+  - the launcher enables the DSi's revised/extended circuits (extended VRAM
+    lets 8-bit VRAM writes through, for example). The core clears those
+    `SCFG_EXT9`/`SCFG_EXT7` bits so old hardware behaves as on a DS;
   - `OS_Init` shrinks MPU region 1 to 4MB. The core re-widens it after `OS_Init`;
   - the ARM7 runs the DSi BIOS, whose `GetPitchTable` (SWI 1Bh) reads the sine
     table. The core replaces the veneer at `0x037FF5A0` and applies GBATEK's

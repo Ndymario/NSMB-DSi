@@ -20,7 +20,7 @@ constexpr uint32_t SHARED_MAGIC7 = 0x37695344; // "DSi7"
 enum SharedFlags : uint32_t {
 	SHARED_DSI_CONSOLE  = 1u << 0, // DSi/3DS hardware, any mode
 	SHARED_TWL_MODE     = 1u << 1, // booted in DSi mode with SCFG unlocked and 16MB mapped
-	SHARED_BOOT_COPIED  = 1u << 2, // TWL boot area mirrored into the NTR shared area
+	SHARED_BOOT_AREA_OK = 1u << 2, // NTR boot area holds the launcher's data (copied now, or on an earlier boot)
 };
 
 // Written by ARM7 before its OS_Init, read by ARM9. 32 bytes.
@@ -56,10 +56,31 @@ inline constexpr BootRange BOOT_RANGES[] = {
 constexpr uintptr_t NTR_SYSTEM_AREA = 0x027FF000;
 constexpr uintptr_t TWL_SYSTEM_AREA = 0x02FFF000;
 
-// Mirrors the TWL boot area into the NTR one. Safe to run on both CPUs: the
-// source is written once by the launcher, so both copies produce the same result.
-inline void mirrorBootArea()
+// After a soft reset (OS_ResetSystem, which NSMB uses to switch between the
+// main game, Mario vs. Luigi and the minigames) the NTR area is already in
+// place and holds state the TWL area does not: the reset parameter at
+// 0x027FFC20 that says which mode to boot, and the multiboot info at
+// 0x027FFC40. Copying again would wipe them. The ROM header is the last range
+// copied and nothing else writes it, so a matching header means the area was
+// mirrored on a previous boot.
+inline bool bootAreaMirrored()
 {
+	auto* ntr = reinterpret_cast<const volatile uint32_t*>(NTR_SYSTEM_AREA + 0xE00);
+	auto* twl = reinterpret_cast<const volatile uint32_t*>(TWL_SYSTEM_AREA + 0xE00);
+	for (uint32_t i = 0; i < 0x160 / 4u; i++)
+		if (ntr[i] != twl[i])
+			return false;
+	return true;
+}
+
+// Mirrors the TWL boot area into the NTR one on a cold boot; returns whether
+// it copied. Safe to run on both CPUs at once: the source is written only by
+// the launcher, so two copies produce the same result.
+inline bool mirrorBootArea()
+{
+	if (bootAreaMirrored())
+		return false;
+
 	for (const BootRange& r : BOOT_RANGES) {
 		auto* src = reinterpret_cast<const volatile uint32_t*>(TWL_SYSTEM_AREA + r.offset);
 		auto* dst = reinterpret_cast<volatile uint32_t*>(NTR_SYSTEM_AREA + r.offset);
@@ -71,6 +92,7 @@ inline void mirrorBootArea()
 	auto* red = reinterpret_cast<volatile uint32_t*>(NTR_SYSTEM_AREA + 0x800);
 	red[0] = *cartId;
 	red[1] = *cartId;
+	return true;
 }
 
 } // namespace dsi

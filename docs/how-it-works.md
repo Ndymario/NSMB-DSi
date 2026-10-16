@@ -20,8 +20,8 @@ two things:
 
 | When | CPU | Where | What the module does |
 |---|---|---|---|
-| Before ARM7 `OS_Init` | ARM7 | `0x037F846C` NitroSpMain: `bl OS_Init` | Detects DSi hardware (`SNDEXCNT`) and DSi mode (`SCFG_EXT7`). In DSi mode it copies the launcher's boot data from `0x02FFFxxx` to `0x027FFxxx`, then publishes what it found in the shared block at `0x027FFA40`. |
-| First game code | ARM9 | `0x020056A8` App::branchToStartup (reached from crt0's NitroStartUp, before OS_Init and NitroMain) | Detects DSi mode: `SCFG_A9ROM = 1`, `SCFG_EXT9` access bit set, RAM limit 16MB. In DSi mode it widens MPU region 1 to 16MB and copies the boot data as well. Both CPUs copy, so neither has to wait for the other. |
+| Before ARM7 `OS_Init` | ARM7 | `0x037F846C` NitroSpMain: `bl OS_Init` | Detects DSi hardware (`SNDEXCNT`) and DSi mode (`SCFG_EXT7`). In DSi mode it switches the ARM7's revised/extended circuits back to NITRO behaviour, copies the launcher's boot data from `0x02FFFxxx` to `0x027FFxxx` (cold boot only), then publishes what it found in the shared block at `0x027FFA40`. |
+| First game code | ARM9 | `0x020056A8` App::branchToStartup (reached from crt0's NitroStartUp, before OS_Init and NitroMain) | Detects DSi mode: `SCFG_A9ROM = 1`, `SCFG_EXT9` access bit set, RAM limit 16MB. In DSi mode it switches the ARM9's revised/extended circuits back to NITRO behaviour, widens MPU region 1 to 16MB and copies the boot data as well. Both CPUs copy, so neither has to wait for the other. |
 | After `OS_Init` | ARM9 | `0x02004E44` App::commonStartup: `bl Memory::initRootHeap` | Reads the ARM7's shared block. The PXI handshake guarantees it is filled in by now. Maps NWRAM, re-asserts region 1 (OS_Init shrinks it to 4MB), sets the clock, and points the main arena at `0x02800000-0x02FFC000`. |
 | After the root heap exists | ARM9 | `0x02004E48` App::commonStartup: `bl 0x02012764` (empty) | Creates `extendedHeap`, `lowHeap` and `nwramHeap`; fills in the report. |
 | Every pitch lookup | ARM7 | `0x037FF5A0` `_Ven_SVC_GetPitchTable` (replaced) | Works around the DSi BIOS `GetPitchTable` bug in DSi mode (see below). |
@@ -45,6 +45,28 @@ load anything. The ranges are listed in
 [`dsi/shared.hpp`](../modules/dsi/include/dsi/shared.hpp). The arena table and
 exception vector at `0x027FFD80-0x027FFDFF` are deliberately skipped, because
 `OS_Init` fills those in on its own.
+
+The copy happens only on a **cold** boot. NSMB switches between the main
+game, Mario vs. Luigi and the minigames with `OS_ResetSystem`. It stores the
+mode to boot into in the reset parameter at `0x027FFC20`, and multiboot info
+lives at `0x027FFC40`. Copying again after such a reset would put back the
+launcher's values: the minigames then rebooted to the Nintendo logo. After a
+reset the NTR ROM header already matches the TWL one (it is the last range
+copied and nothing else writes it), so `mirrorBootArea()` checks that and
+does nothing.
+
+### Why the extended circuits are switched off
+
+The launcher starts a DSi-enhanced title with every DSi improvement to the old
+hardware switched on: `SCFG_EXT9 = 8307F100h`, and `SCFG_EXT7` from the header.
+NTR code was written against the NITRO behaviour. With "extended VRAM
+access", for example, 8-bit writes to VRAM take effect, while a DS drops them.
+So the core clears those bits and keeps only access to the new resources:
+- ARM9 `SCFG_EXT9` bits 0-4, 7, 8, 12 and 13, which leaves `8307C000h`;
+- ARM7 `SCFG_EXT7` bits 0-2, 8, 9 and 10.
+
+The header asks for NITRO behaviour on the ARM7 too, for loaders that honour
+it.
 
 ### Why the ARM7 needs a BIOS fix
 
