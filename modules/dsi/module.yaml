@@ -51,6 +51,13 @@ components:
       requires: Core
       sources: "source9/nwram/**"
 
+  # Just for fun: in DSi mode the Nintendo logo plays the Mega Mushroom
+  # appearing sound instead of its coin ding.
+  - MegaLogo:
+      target: arm9
+      requires: ExtendedRam
+      sources: "source9/megalogo/**"
+
   # Boot and per-frame figures for tools/harness. Development aid; off in releases.
   - Report:
       target: arm9

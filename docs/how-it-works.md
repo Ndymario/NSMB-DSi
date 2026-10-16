@@ -25,10 +25,12 @@ two things:
 | After `OS_Init` | ARM9 | `0x02004E44` App::commonStartup: `bl Memory::initRootHeap` | Reads the ARM7's shared block. The PXI handshake guarantees it is filled in by now. Maps NWRAM, re-asserts region 1 (OS_Init shrinks it to 4MB), sets the clock, and points the main arena at `0x02800000-0x02FFC000`. |
 | After the root heap exists | ARM9 | `0x02004E48` App::commonStartup: `bl 0x02012764` (empty) | Creates `extendedHeap`, `lowHeap` and `nwramHeap`; fills in the report. |
 | Every pitch lookup | ARM7 | `0x037FF5A0` `_Ven_SVC_GetPitchTable` (replaced) | Works around the DSi BIOS `GetPitchTable` bug in DSi mode (see below). |
+| Nintendo logo (MegaLogo only) | ARM9 | ov1 `0x020CCDDC` BootScene: `bl SND::playSFX` (logo ding), ov1 `0x020CCB28` `BootScene::onDestroy` | In DSi mode, loads the Mega Mushroom's sound group into a 1MB NNS sound heap borrowed from `extendedHeap` and plays it instead of the ding. Destroys the heap when the logo scene ends, which clears the archive's file pointers before the title screen loads its sounds. |
 | Every frame (Report only) | ARM9 | `0x02004F14` / `0x02004F18` App::gameLoop: around `waitVBlankIntr` | Samples heap free sizes and the CPU time spent per frame. |
 
-Every patch is in `main0` or ARM7 main (no overlay IDs) and on ARM-mode code.
-All are `ncp_hook`s except the pitch-table veneer, which is an `ncp_jump`. The addresses come from disassembling the clean US binaries, named with
+Every patch is on ARM-mode code. All are in `main0` or ARM7 main except
+MegaLogo's two, which are in overlay 1. All are `ncp_hook`s except the
+pitch-table veneer (`ncp_jump`) and the logo sound call (`ncp_call`). The addresses come from disassembling the clean US binaries, named with
 symbols from NSMB-Code-Reference `ac82391`. Each was then confirmed at runtime
 by the harness: hook order, register values, and the report contents.
 

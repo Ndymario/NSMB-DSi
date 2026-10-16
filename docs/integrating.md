@@ -53,6 +53,7 @@ modules:
 | `ExtendedRam` | Core | Root heap moved to `0x02800000`; `extendedHeap`, `lowHeap` |
 | `FastClock` | Core | ARM9 at 134MHz at boot (without it: 67MHz) |
 | `NWram` | Core | `nwramHeap`; MPU region 1 widened to 32MB |
+| `MegaLogo` | ExtendedRam | Nintendo logo plays the Mega Mushroom sound in DSi mode |
 | `Report` | Core | Boot report and per-frame figures for `tools/harness` |
 
 ## 4. Use the API

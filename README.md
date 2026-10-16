@@ -98,6 +98,7 @@ components you can switch off, and notes on NSMB co-op.
 | `ExtendedRam` | Root heap to `0x02800000` (8MB); `extendedHeap` (4MB), `lowHeap` (2.3MB) | on |
 | `FastClock` | ARM9 at 134MHz; without it the core sets 67MHz | on |
 | `NWram` | 768KB of new shared WRAM as `nwramHeap` | on |
+| `MegaLogo` | Just for fun: in DSi mode the Nintendo logo plays the Mega Mushroom sound instead of its coin ding | on |
 | `Report` | Boot and per-frame figures for the test harness | on here, off in releases |
 
 ## Testing
