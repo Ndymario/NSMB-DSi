@@ -62,6 +62,15 @@ shell profile. Run it again any time; it only redoes what changed.
 
 The output is `build/nsmb-dsi.nds`. To play it in DSi mode, set melonDS to
 *Console type: DSi* with your DSi BIOS, firmware and NAND, and use direct boot.
+Start melonDS from a terminal to see which mode the game is in: the module
+logs a summary through the no$gba debug port at boot.
+
+```
+[DSi] DSi mode: ARM9 134 MHz, root heap 0x02800000 (8175 KB)
+[DSi] extra heaps: extended 3967 KB, low 2363 KB, NWRAM 767 KB
+```
+
+In DS mode it prints `[DSi] DS mode: module inactive, game unchanged`.
 
 ## Using the module in your own project
 

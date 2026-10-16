@@ -81,6 +81,8 @@ void DSi_afterRootHeap()
 			DSi_nwramAfterRootHeap();
 	}
 
+	logBootSummary();
+
 	if (DSi_collectReport)
 		DSi_collectReport();
 }

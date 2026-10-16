@@ -22,6 +22,12 @@ bool isConsole();
 // Every resource below requires this.
 bool isTwlMode();
 
+// printf-style line (OS_VSNPrintf formats, newline added) to the emulator's
+// debug console via the no$gba debug register; melonDS prints it to the
+// terminal it was started from. Does nothing on hardware. Lines over 190
+// characters are cut.
+void log(const char* format, ...) __attribute__((format(printf, 1, 2)));
+
 // --- ExtendedRam ---------------------------------------------------------
 
 // The root heap (where `new` and the game's own scene/actor/file allocations

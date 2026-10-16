@@ -83,6 +83,9 @@ Rules:
 - **The clock can change.** `DSi::setFastClock(bool)` switches between 67MHz
   and 134MHz at any time (for example from an options menu). It returns false
   outside DSi mode.
+- **Logging.** `DSi::log("...", ...)` prints a printf-style line to the
+  emulator console (no$gba debug port; melonDS prints it to its terminal). It
+  does nothing on hardware, so it is safe to leave in.
 - **Plain `new` already benefits.** The root heap is 3.5x larger in DSi mode,
   so most mods get more headroom without calling the API at all.
 

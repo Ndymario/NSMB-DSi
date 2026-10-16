@@ -22,6 +22,9 @@ struct State {
 
 extern State state;
 
+// One or two [DSi] lines describing what the module set up (core/log.cpp).
+void logBootSummary();
+
 // CP15 protection region 1 (main RAM), GBATEK "ARM CP15 Protection Unit".
 // 0x0200002F = base 0x02000000, 16MB, enabled: all of DSi main RAM.
 // 0x02000031 = base 0x02000000, 32MB, enabled: main RAM plus the WRAM space at

@@ -7,6 +7,7 @@
 #include <condition_variable>
 #include <cstdarg>
 #include <cstdio>
+#include <cstring>
 #include <mutex>
 #include <thread>
 
@@ -74,14 +75,16 @@ u64 FileLength(FileHandle* f)
 	return len;
 }
 
+// The module's own debug lines start with "[DSi]" and are always shown.
 void Log(LogLevel level, const char* fmt, ...)
 {
-	if (level < g_logLevel)
-		return;
+	char line[1024];
 	va_list args;
 	va_start(args, fmt);
-	vfprintf(stderr, fmt, args);
+	vsnprintf(line, sizeof(line), fmt, args);
 	va_end(args);
+	if (level >= g_logLevel || strncmp(line, "[DSi]", 5) == 0)
+		fputs(line, stderr);
 }
 
 struct Thread { std::thread t; };
