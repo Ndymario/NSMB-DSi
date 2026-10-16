@@ -6,8 +6,8 @@ mode, and changes nothing when it is not.
 
 | | DS, or DSi in DS mode | DSi mode |
 |---|---|---|
-| Root heap (everything the game allocates) | 2.3MB | **8.0MB** |
-| Lowest free root heap, title → 1-1 | 0.4MB | **6.0MB** |
+| Root heap (everything the game allocates) | 2.3MB | **7.9MB** |
+| Lowest free root heap, title → 1-1 | 0.4MB | **5.9MB** |
 | Extra heaps for mods (`DSi::extendedHeap`, `lowHeap`, `nwramHeap`) | none | **4.0MB + 2.3MB + 768KB** |
 | ARM9 clock | 67MHz | **134MHz** (41% less CPU time per frame in 1-1) |
 
@@ -29,7 +29,7 @@ loaders start it with 16MB of RAM and the SCFG registers unlocked. The module
 then handles what the NTR SDK does not expect:
 - it mirrors the launcher's boot data from `0x02FFFxxx` to `0x027FFxxx`;
 - it widens the MPU;
-- it moves the root heap into the upper 8MB;
+- it moves the root heap into the upper 8MB (`0x02800000`–`0x02FE0000`);
 - it turns the remaining free RAM and the DSi's new WRAM into heaps;
 - it switches the ARM9 to 134MHz.
 
@@ -95,7 +95,7 @@ components you can switch off, and notes on NSMB co-op.
 | Component | What it does | Default |
 |---|---|---|
 | `Core`, `Core7` | DSi detection, boot data fix-up, DSi-BIOS sound fix, public API | always on |
-| `ExtendedRam` | Root heap to `0x02800000` (8MB); `extendedHeap` (4MB), `lowHeap` (2.3MB) | on |
+| `ExtendedRam` | Root heap to `0x02800000` (7.9MB); `extendedHeap` (4MB), `lowHeap` (2.3MB) | on |
 | `FastClock` | ARM9 at 134MHz; without it the core sets 67MHz | on |
 | `NWram` | 768KB of new shared WRAM as `nwramHeap` | on |
 | `MegaLogo` | Just for fun: in DSi mode the Nintendo logo plays the Mega Mushroom sound instead of its coin ding | on |
@@ -109,6 +109,9 @@ mode, plays a scripted run, and reads the module's boot report out of emulated R
 ```bash
 python3 tools/harness/run.py --check
 ```
+
+Add `--vs` to also play a two-console Mario vs. Luigi match over melonDS's
+local wireless. It runs in real time, so it takes about two minutes.
 
 It writes contact sheets and JSON reports to `build/harness/`, and exits non-zero if an invariant
 breaks: DS mode must stay vanilla, DSi mode must get every resource, and the

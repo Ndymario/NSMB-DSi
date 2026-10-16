@@ -27,7 +27,7 @@ components:
       requires: Core
       sources: "source7/core/**"
 
-  # Moves the root heap into the upper 8MB of DSi RAM and turns the rest into
+  # Moves the root heap into the upper 7.9MB of DSi RAM and turns the rest into
   # two spare heaps (DSi::extendedHeap, DSi::lowHeap).
   - ExtendedRam:
       target: arm9
@@ -35,7 +35,7 @@ components:
       sources: "source9/extram/**"
       defines:
         - DSI_ROOT_HEAP_START=0x02800000
-        - DSI_ROOT_HEAP_END=0x02FFC000
+        - DSI_ROOT_HEAP_END=0x02FE0000
         - DSI_EXT_HEAP_START=0x02400000
         - DSI_EXT_HEAP_END=0x027E0000
 

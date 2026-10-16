@@ -2,6 +2,7 @@
 // No networking, camera, microphone or add-ons: the harness only boots ROMs.
 
 #include "Platform.h"
+#include "net/LocalMP.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -124,15 +125,18 @@ void WriteGBASave(const u8*, u32, u32, u32, void*) {}
 void WriteFirmware(const Firmware&, u32, u32, void*) {}
 void WriteDateTime(int, int, int, int, int, int, void*) {}
 
-void MP_Begin(void*) {}
-void MP_End(void*) {}
-int MP_SendPacket(u8*, int, u64, void*) { return 0; }
-int MP_RecvPacket(u8*, u64*, void*) { return 0; }
-int MP_SendCmd(u8*, int, u64, void*) { return 0; }
-int MP_SendReply(u8*, int, u64, u16, void*) { return 0; }
-int MP_SendAck(u8*, int, u64, void*) { return 0; }
-int MP_RecvHostPacket(u8*, u64*, void*) { return 0; }
-u16 MP_RecvReplies(u8*, u64, u16, void*) { return 0; }
+// Local wireless between the consoles of one --mp run; userdata is the instance.
+static LocalMP& mp() { static LocalMP local; return local; }
+static int inst(void* userdata) { return static_cast<int>(reinterpret_cast<intptr_t>(userdata)); }
+void MP_Begin(void* u) { mp().Begin(inst(u)); }
+void MP_End(void* u) { mp().End(inst(u)); }
+int MP_SendPacket(u8* d, int len, u64 ts, void* u) { return mp().SendPacket(inst(u), d, len, ts); }
+int MP_RecvPacket(u8* d, u64* ts, void* u) { return mp().RecvPacket(inst(u), d, ts); }
+int MP_SendCmd(u8* d, int len, u64 ts, void* u) { return mp().SendCmd(inst(u), d, len, ts); }
+int MP_SendReply(u8* d, int len, u64 ts, u16 aid, void* u) { return mp().SendReply(inst(u), d, len, ts, aid); }
+int MP_SendAck(u8* d, int len, u64 ts, void* u) { return mp().SendAck(inst(u), d, len, ts); }
+int MP_RecvHostPacket(u8* d, u64* ts, void* u) { return mp().RecvHostPacket(inst(u), d, ts); }
+u16 MP_RecvReplies(u8* d, u64 ts, u16 mask, void* u) { return mp().RecvReplies(inst(u), d, ts, mask); }
 int Net_SendPacket(u8*, int, void*) { return 0; }
 int Net_RecvPacket(u8*, void*) { return 0; }
 

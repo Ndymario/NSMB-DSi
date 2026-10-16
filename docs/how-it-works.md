@@ -22,7 +22,7 @@ two things:
 |---|---|---|---|
 | Before ARM7 `OS_Init` | ARM7 | `0x037F846C` NitroSpMain: `bl OS_Init` | Detects DSi hardware (`SNDEXCNT`) and DSi mode (`SCFG_EXT7`). In DSi mode it switches the ARM7's revised/extended circuits back to NITRO behaviour, copies the launcher's boot data from `0x02FFFxxx` to `0x027FFxxx` (cold boot only), then publishes what it found in the shared block at `0x027FFA40`. |
 | First game code | ARM9 | `0x020056A8` App::branchToStartup (reached from crt0's NitroStartUp, before OS_Init and NitroMain) | Detects DSi mode: `SCFG_A9ROM = 1`, `SCFG_EXT9` access bit set, RAM limit 16MB. In DSi mode it switches the ARM9's revised/extended circuits back to NITRO behaviour, widens MPU region 1 to 16MB and copies the boot data as well. Both CPUs copy, so neither has to wait for the other. |
-| After `OS_Init` | ARM9 | `0x02004E44` App::commonStartup: `bl Memory::initRootHeap` | Reads the ARM7's shared block. The PXI handshake guarantees it is filled in by now. Maps NWRAM, re-asserts region 1 (OS_Init shrinks it to 4MB), sets the clock, and points the main arena at `0x02800000-0x02FFC000`. |
+| After `OS_Init` | ARM9 | `0x02004E44` App::commonStartup: `bl Memory::initRootHeap` | Reads the ARM7's shared block. The PXI handshake guarantees it is filled in by now. Maps NWRAM, re-asserts region 1 (OS_Init shrinks it to 4MB), sets the clock, and points the main arena at `0x02800000-0x02FE0000`. |
 | After the root heap exists | ARM9 | `0x02004E48` App::commonStartup: `bl 0x02012764` (empty) | Creates `extendedHeap`, `lowHeap` and `nwramHeap`; fills in the report. |
 | Every pitch lookup | ARM7 | `0x037FF5A0` `_Ven_SVC_GetPitchTable` (replaced) | Works around the DSi BIOS `GetPitchTable` bug in DSi mode (see below). |
 | Nintendo logo (MegaLogo only) | ARM9 | ov1 `0x020CCDDC` BootScene: `bl SND::playSFX` (logo ding), ov1 `0x020CCB28` `BootScene::onDestroy` | In DSi mode, loads the Mega Mushroom's sound group into a 1MB NNS sound heap borrowed from `extendedHeap` and plays it instead of the ding. Destroys the heap when the logo scene ends, which clears the archive's file pointers before the title screen loads its sounds. |
@@ -99,9 +99,18 @@ allocator hooks, no file-system hooks, and no special cases.
 | `0x023E0000-0x02400000` | 128KB | MPU region 2 guard (NTR SDK), left alone |
 | `0x02400000-0x027E0000` | 3.9MB | **`DSi::extendedHeap()`** |
 | `0x027E0000-0x02800000` | 128KB | ARM7 code/data, ARM9 DTCM, NTR shared area |
-| `0x02800000-0x02FFC000` | 8.0MB | **root heap** |
+| `0x02800000-0x02FE0000` | 7.9MB | **root heap** |
+| `0x02FE0000-0x02FFBFFF` | 112KB | DSi launcher data, left alone (see below) |
 | `0x02FFC000-0x02FFFFFF` | 16KB | DSi system area (launcher boot data) |
 | `0x03000000-0x030BFFFF` | 768KB | **`DSi::nwramHeap()`** (NWRAM-A/B/C, ARM9 only) |
+
+The root heap stops 112KB short of the system area on purpose. DSi software
+reads launcher data there, and stock melonDS fakes one word of it:
+`DSi::ARM9Read32` always returns `FFFFFFFF` for `0x02FE71B0`, a region-lock
+bypass. An earlier version ran the heap to `0x02FFC000`. During a Mario vs.
+Luigi match a compressed Grassland tile file landed on that word, and 4 bytes
+of `FF` turned into the stray background tiles. `run.py --check` now asserts
+the heap ends at or below `0x02FE0000`, and `--check --vs` replays the match.
 
 The ExtendedRam component's defines (`DSI_ROOT_HEAP_START` and friends) move
 these bounds, for example to leave room for a loader that needs part of upper RAM.
@@ -146,8 +155,11 @@ All measured with `tools/harness` on stock melonDS 1.1 (interpreter, direct boot
 - **Sound matches DS mode.** The title music's averaged spectrum has 0.999
   correlation with the DS run, with the same dominant pitches. Before the
   pitch-table fix it was 0.36.
-- **RAM.** The root heap grows from 2.3MB to 8.0MB. Its lowest free size during
-  the run goes from 0.37MB to 6.0MB.
+- **RAM.** The root heap grows from 2.3MB to 7.9MB. Its lowest free size during
+  the run goes from 0.37MB to 5.9MB.
+- **Two-player Mario vs. Luigi** over local wireless, both consoles in DSi
+  mode, connects, sets up and plays Grassland. The background is
+  pixel-identical to DS mode.
 - **Clock.** Median CPU time per frame standing in 1-1 is 2046 ticks (3.9ms) in
   DS mode and 2048 in DSi mode at 67MHz, so DSi mode by itself changes nothing.
   At 134MHz it is 1216 ticks (2.3ms), 41% less; the rest is memory-bound.

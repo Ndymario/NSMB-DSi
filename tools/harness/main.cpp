@@ -5,10 +5,16 @@
 //   harness --console dsi --rom build/nsmb-dsi.nds --frames 900 \
 //           --press 300:start --shot 900:out.ppm --report
 //
-// BIOS/firmware/NAND paths come from flags (see --help); tools/run.sh fills
-// them in from your melonDS settings.
+// With --mp, a second console runs alongside the first, linked by melonDS's
+// local wireless (LocalMP), each in its own thread. Script it with the "2"
+// variants of the per-player flags: --press2, --touch2, --shot2, --wav2, --nand2.
+// Both consoles run at real-time speed, as in the melonDS frontend.
+//
+// BIOS/firmware/NAND paths come from flags (see --help); tools/harness/run.py
+// fills them in from your melonDS settings.
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -17,6 +23,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "Args.h"
@@ -69,21 +76,28 @@ const std::map<std::string, int> KEYS = {
 
 struct Press { u32 frame, hold, mask; };
 struct Shot { u32 frame; std::string path; };
-struct Dump { u32 frame, address, length; bool arm7; };
+struct Dump { u32 frame, address, length; bool arm7; std::string path; };
 struct Touch { u32 frame, hold; u16 x, y; };
+
+// What one console does during the run.
+struct Script {
+	std::vector<Press> presses;
+	std::vector<Shot> shots;
+	std::vector<Dump> dumps;
+	std::vector<Touch> touches;
+	std::string wav;
+	std::string nand;
+};
 
 struct Options {
 	std::string console = "ds";
 	std::string rom;
 	u32 frames = 600;
-	std::vector<Press> presses;
-	std::vector<Shot> shots;
-	std::vector<Dump> dumps;
-	std::vector<Touch> touches;
+	bool mp = false;
+	Script player[2];
 	bool report = false;
-	std::string wav;
 	std::string bios9, bios7, firmware;
-	std::string dsiBios9, dsiBios7, dsiFirmware, nand;
+	std::string dsiBios9, dsiBios7, dsiFirmware;
 };
 
 // "300:start" or "300+10:a+b" (frame, optional hold length, keys)
@@ -114,17 +128,29 @@ Options parse(int argc, char** argv)
 	for (int i = 1; i < argc; i++) {
 		std::string a = argv[i];
 		auto next = [&]() -> std::string { if (++i >= argc) die("missing value for " + a); return argv[i]; };
+		// Per-player flags take a "2" suffix for the second console.
+		Script& sc = o.player[a.size() > 2 && a.back() == '2' ? 1 : 0];
+		if (&sc == &o.player[1])
+			a.pop_back();
 		if (a == "--console") o.console = next();
+		else if (a == "--mp") o.mp = true;
 		else if (a == "--rom") o.rom = next();
 		else if (a == "--frames") o.frames = std::stoul(next());
-		else if (a == "--press") o.presses.push_back(parsePress(next()));
-		else if (a == "--shot") { auto s = next(); auto c = s.find(':'); o.shots.push_back({(u32)std::stoul(s.substr(0, c)), s.substr(c + 1)}); }
+		else if (a == "--press") sc.presses.push_back(parsePress(next()));
+		else if (a == "--shot") { auto s = next(); auto c = s.find(':'); sc.shots.push_back({(u32)std::stoul(s.substr(0, c)), s.substr(c + 1)}); }
 		else if (a == "--dump" || a == "--dump7") {
 			// F:ADDR:LEN, hex address and length; --dump7 reads through the ARM7 bus
 			unsigned f, addr, len;
 			if (sscanf(next().c_str(), "%u:%x:%x", &f, &addr, &len) != 3)
 				die("bad " + a + ", expected FRAME:ADDR:LEN");
-			o.dumps.push_back({f, addr, len, a == "--dump7"});
+			sc.dumps.push_back({f, addr, len, a == "--dump7"});
+		}
+		else if (a == "--save") {
+			// F:ADDR:LEN:PATH, raw bytes through the ARM9 bus
+			unsigned f, addr, len; char path[1024];
+			if (sscanf(next().c_str(), "%u:%x:%x:%1023s", &f, &addr, &len, path) != 4)
+				die("bad --save, expected FRAME:ADDR:LEN:PATH");
+			sc.dumps.push_back({f, addr, len, false, path});
 		}
 		else if (a == "--touch") {
 			// F[+HOLD]:X,Y on the bottom screen
@@ -132,10 +158,10 @@ Options parse(int argc, char** argv)
 			auto spec = next();
 			if (sscanf(spec.c_str(), "%u+%u:%u,%u", &f, &hold, &x, &y) != 4 && sscanf(spec.c_str(), "%u:%u,%u", &f, &x, &y) != 3)
 				die("bad --touch, expected FRAME[+HOLD]:X,Y");
-			o.touches.push_back({f, hold, (u16)x, (u16)y});
+			sc.touches.push_back({f, hold, (u16)x, (u16)y});
 		}
 		else if (a == "--report") o.report = true;
-		else if (a == "--wav") o.wav = next();
+		else if (a == "--wav") sc.wav = next();
 		else if (a == "--log") { auto l = next(); Platform::g_logLevel = l == "debug" ? 0 : l == "info" ? 1 : l == "warn" ? 2 : 3; }
 		else if (a == "--bios9") o.bios9 = next();
 		else if (a == "--bios7") o.bios7 = next();
@@ -143,10 +169,12 @@ Options parse(int argc, char** argv)
 		else if (a == "--dsi-bios9") o.dsiBios9 = next();
 		else if (a == "--dsi-bios7") o.dsiBios7 = next();
 		else if (a == "--dsi-firmware") o.dsiFirmware = next();
-		else if (a == "--nand") o.nand = next();
+		else if (a == "--nand") sc.nand = next();
 		else if (a == "--help" || a == "-h") {
-			puts("harness --rom ROM [--console ds|dsi] [--frames N] [--press F[+HOLD]:keys]... [--shot F:out.ppm]... [--report]\n"
-			     "        [--bios9 F --bios7 F --firmware F] [--dsi-bios9 F --dsi-bios7 F --dsi-firmware F --nand F] [--log debug|info|warn|error]");
+			puts("harness --rom ROM [--console ds|dsi] [--frames N] [--report] [--log debug|info|warn|error]\n"
+			     "        [--press F[+HOLD]:keys] [--touch F[+HOLD]:X,Y] [--shot F:out.ppm] [--dump F:ADDR:LEN] [--dump7 ...] [--wav out.wav]\n"
+			     "        [--bios9 F --bios7 F --firmware F] [--dsi-bios9 F --dsi-bios7 F --dsi-firmware F --nand F]\n"
+			     "        [--mp] [--press2 ...] [--touch2 ...] [--shot2 ...] [--wav2 ...] [--nand2 F]");
 			exit(0);
 		}
 		else die("unknown argument " + a);
@@ -158,8 +186,17 @@ Options parse(int argc, char** argv)
 	return o;
 }
 
-std::unique_ptr<NDS> makeConsole(const Options& o)
+// Each wireless console needs its own MAC address.
+void setInstanceMac(Firmware& fw, int inst)
 {
+	fw.GetHeader().MacAddr[5] += inst;
+	fw.UpdateChecksums();
+}
+
+std::unique_ptr<NDS> makeConsole(const Options& o, int inst)
+{
+	void* userdata = reinterpret_cast<void*>(static_cast<intptr_t>(inst));
+	const Script& sc = o.player[inst];
 	NDSArgs args;
 	args.JIT = std::nullopt;
 	if (!o.bios9.empty()) args.ARM9BIOS = readBios<ARM9BIOSSize>(o.bios9);
@@ -170,21 +207,23 @@ std::unique_ptr<NDS> makeConsole(const Options& o)
 			auto fw = readFile(o.firmware);
 			args.Firmware = Firmware(fw.data(), fw.size());
 		}
-		return std::make_unique<NDS>(std::move(args));
+		setInstanceMac(args.Firmware, inst);
+		return std::make_unique<NDS>(std::move(args), userdata);
 	}
 
-	if (o.dsiBios9.empty() || o.dsiBios7.empty() || o.dsiFirmware.empty() || o.nand.empty())
-		die("DSi mode needs --dsi-bios9, --dsi-bios7, --dsi-firmware and --nand");
+	if (o.dsiBios9.empty() || o.dsiBios7.empty() || o.dsiFirmware.empty() || sc.nand.empty())
+		die("DSi mode needs --dsi-bios9, --dsi-bios7, --dsi-firmware and --nand (and --nand2 with --mp)");
 	auto fw = readFile(o.dsiFirmware);
 	args.Firmware = Firmware(fw.data(), fw.size());
+	setInstanceMac(args.Firmware, inst);
 
 	auto bios7i = readBios<DSiBIOSSize>(o.dsiBios7);
-	auto nandFile = Platform::OpenFile(o.nand, Platform::FileMode::ReadWriteExisting);
+	auto nandFile = Platform::OpenFile(sc.nand, Platform::FileMode::ReadWriteExisting);
 	if (!nandFile)
-		die("cannot open NAND " + o.nand);
+		die("cannot open NAND " + sc.nand);
 	DSi_NAND::NANDImage nand(nandFile, &(*bios7i)[0x8308]);
 	if (!nand)
-		die("cannot parse NAND " + o.nand);
+		die("cannot parse NAND " + sc.nand);
 
 	DSiArgs dsiArgs{
 		std::move(args),
@@ -195,7 +234,7 @@ std::unique_ptr<NDS> makeConsole(const Options& o)
 		false, // FullBIOSBoot
 		true,  // DSP HLE
 	};
-	return std::make_unique<DSi>(std::move(dsiArgs));
+	return std::make_unique<DSi>(std::move(dsiArgs), userdata);
 }
 
 void writePPM(NDS& nds, const std::string& path)
@@ -296,62 +335,103 @@ void printReport(NDS& nds)
 	printf("  }\n}\n");
 }
 
+// With --mp both consoles run at real-time speed, as in the melonDS frontend:
+// local wireless waits for replies in wall-clock time, so consoles running
+// unthrottled drift apart in emulated time and drop the connection.
+int consoleCount = 1;
+
+void pace(std::chrono::steady_clock::time_point start, u32 frame)
+{
+	if (consoleCount < 2)
+		return;
+	std::this_thread::sleep_until(start + std::chrono::microseconds(frame * 16715ull)); // 59.83Hz
+}
+
+// Runs one console through its script.
+void play(const Options& o, NDS& nds, const Script& sc)
+{
+	std::vector<s16> audio;
+	const auto start = std::chrono::steady_clock::now();
+	for (u32 frame = 1; frame <= o.frames; frame++) {
+		pace(start, frame);
+		u32 held = 0;
+		for (const Press& p : sc.presses)
+			if (frame >= p.frame && frame < p.frame + p.hold)
+				held |= p.mask;
+		nds.SetKeyMask(0xFFF & ~held);
+		const Touch* touch = nullptr;
+		for (const Touch& t : sc.touches)
+			if (frame >= t.frame && frame < t.frame + t.hold)
+				touch = &t;
+		if (touch) nds.TouchScreen(touch->x, touch->y);
+		else nds.ReleaseScreen();
+		nds.RunFrame();
+		if (!sc.wav.empty()) {
+			s16 chunk[4096 * 2];
+			int n;
+			while ((n = nds.SPU.ReadOutput(chunk, 4096)) > 0)
+				audio.insert(audio.end(), chunk, chunk + n * 2);
+		}
+		for (const Shot& s : sc.shots)
+			if (s.frame == frame)
+				writePPM(nds, s.path);
+		for (const Dump& d : sc.dumps)
+			if (d.frame == frame && !d.path.empty()) {
+				std::vector<u8> bytes(d.length);
+				for (u32 i = 0; i < d.length; i++)
+					bytes[i] = nds.ARM9Read8(d.address + i);
+				FILE* f = fopen(d.path.c_str(), "wb");
+				if (!f)
+					die("cannot write " + d.path);
+				fwrite(bytes.data(), 1, bytes.size(), f);
+				fclose(f);
+			} else if (d.frame == frame) {
+				printf("frame %u, %s %08X:", frame, d.arm7 ? "arm7" : "arm9", d.address);
+				for (u32 i = 0; i < d.length; i += 4)
+					printf(" %08X", d.arm7 ? nds.ARM7Read32(d.address + i) : nds.ARM9Read32(d.address + i));
+				printf("\n");
+			}
+	}
+	if (!sc.wav.empty())
+		writeWav(sc.wav, audio, 48000);
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
 	Options o = parse(argc, argv);
-	auto nds = makeConsole(o);
-
+	const int count = consoleCount = o.mp ? 2 : 1;
 	auto rom = readFile(o.rom);
-	auto cart = NDSCart::ParseROM(rom.data(), rom.size());
-	if (!cart)
-		die("cannot parse ROM " + o.rom);
 
-	nds->Reset();
-	nds->SetNDSCart(std::move(cart));
-	nds->SetupDirectBoot(o.rom);
-	nds->Start();
+	std::unique_ptr<NDS> consoles[2];
+	for (int inst = 0; inst < count; inst++) {
+		consoles[inst] = makeConsole(o, inst);
+		auto cart = NDSCart::ParseROM(rom.data(), rom.size());
+		if (!cart)
+			die("cannot parse ROM " + o.rom);
+		consoles[inst]->Reset();
+		consoles[inst]->SetNDSCart(std::move(cart));
+		consoles[inst]->SetupDirectBoot(o.rom);
+		consoles[inst]->Start();
+	}
 
-	std::vector<s16> audio;
-	size_t shot = 0;
-	for (u32 frame = 1; frame <= o.frames; frame++) {
-		u32 held = 0;
-		for (const Press& p : o.presses)
-			if (frame >= p.frame && frame < p.frame + p.hold)
-				held |= p.mask;
-		nds->SetKeyMask(0xFFF & ~held);
-		const Touch* touch = nullptr;
-		for (const Touch& t : o.touches)
-			if (frame >= t.frame && frame < t.frame + t.hold)
-				touch = &t;
-		if (touch) nds->TouchScreen(touch->x, touch->y);
-		else nds->ReleaseScreen();
-		nds->RunFrame();
-		if (!o.wav.empty()) {
-			s16 chunk[4096 * 2];
-			int n;
-			while ((n = nds->SPU.ReadOutput(chunk, 4096)) > 0)
-				audio.insert(audio.end(), chunk, chunk + n * 2);
-		}
-		for (const Shot& s : o.shots)
-			if (s.frame == frame) {
-				writePPM(*nds, s.path);
-				shot++;
-			}
-		for (const Dump& d : o.dumps)
-			if (d.frame == frame) {
-				printf("frame %u, %s %08X:", frame, d.arm7 ? "arm7" : "arm9", d.address);
-				for (u32 i = 0; i < d.length; i += 4)
-					printf(" %08X", d.arm7 ? nds->ARM7Read32(d.address + i) : nds->ARM9Read32(d.address + i));
-				printf("\n");
-			}
+	if (count == 1) {
+		play(o, *consoles[0], o.player[0]);
+	} else {
+		std::thread second([&] { play(o, *consoles[1], o.player[1]); });
+		play(o, *consoles[0], o.player[0]);
+		second.join();
 	}
 
 	fprintf(stderr, "harness: %u save write(s)\n", Platform::g_saveWrites);
-	if (!o.wav.empty())
-		writeWav(o.wav, audio, 48000);
-	if (o.report)
-		printReport(*nds);
+	if (o.report) {
+		if (count == 2) printf("{\"players\": [\n");
+		for (int inst = 0; inst < count; inst++) {
+			if (inst) printf(",\n");
+			printReport(*consoles[inst]);
+		}
+		if (count == 2) printf("]}\n");
+	}
 	return 0;
 }

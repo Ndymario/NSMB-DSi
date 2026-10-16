@@ -55,7 +55,9 @@ music's spectrum between DS and DSi mode (needs numpy). It also replays the
 Minigames → title → Mario vs. Luigi mode switches and compares the frames
 (needs Pillow). Look at
 `build/harness/*_sheet.png` as well as the verdict. Other useful commands:
-`tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
+`run.py --check --vs` adds a two-console Mario vs. Luigi match over local
+wireless (real time, about 2 minutes); use it for anything touching memory or
+wireless. `tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
 `python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
 (`--dump F:ADDR:LEN`, `--dump7`, `--touch`, `--press`, `--shot`).
 
@@ -736,7 +738,9 @@ reasoning in `docs/how-it-works.md`.
 - **Hook order on ARM9:** crt0 calls `NitroStartUp`, which runs
   `App::commonStartup` and `OS_Init`, **before** `NitroMain`. Code that must
   run first hooks `App::branchToStartup` (`0x020056A8`), not `NitroMain`.
-- **Memory:** the root heap moves to `0x02800000-0x02FFC000`. The only reader of
+- **Memory:** the root heap moves to `0x02800000-0x02FE0000`. Never let it
+  reach `0x02FE0000+`: that holds DSi launcher data, and melonDS fakes the word
+  at `0x02FE71B0` (it reads `FFFFFFFF`), which once corrupted VS backgrounds. The only reader of
   the main arena is `Memory::initRootHeap`; main and all 131 overlays were checked.
   `0x02400000-0x027E0000` and the old arena become spare heaps. NWRAM-A/B/C maps
   to the ARM9 at `0x03000000` with region 1 = `0x02000031`.

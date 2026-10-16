@@ -44,7 +44,7 @@ modules:
           Report: { enabled: false }          # always, for releases
           NWram: { enabled: false }
           ExtendedRam:
-            defines: [DSI_ROOT_HEAP_END=0x02F00000]   # leave 1MB below the system area
+            defines: { DSI_ROOT_HEAP_END: 0x02F00000 }   # leave room for a loader
 ```
 
 | Component | Requires | Provides |
@@ -87,7 +87,7 @@ Rules:
 - **Logging.** `DSi::log("...", ...)` prints a printf-style line to the
   emulator console (no$gba debug port; melonDS prints it to its terminal). It
   does nothing on hardware, so it is safe to leave in.
-- **Plain `new` already benefits.** The root heap is 3.5x larger in DSi mode,
+- **Plain `new` already benefits.** The root heap is 3.4x larger in DSi mode,
   so most mods get more headroom without calling the API at all.
 
 ## NSMB co-op

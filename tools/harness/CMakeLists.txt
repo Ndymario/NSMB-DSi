@@ -9,7 +9,7 @@ set(ENABLE_GDBSTUB OFF CACHE BOOL "" FORCE)
 set(ENABLE_JIT OFF CACHE BOOL "" FORCE)
 add_subdirectory(${MELONDS_DIR} melonDS EXCLUDE_FROM_ALL)
 
-add_executable(harness main.cpp platform.cpp)
+add_executable(harness main.cpp platform.cpp ${MELONDS_DIR}/src/net/LocalMP.cpp)
 target_compile_features(harness PRIVATE cxx_std_20)
 target_include_directories(harness PRIVATE
 	${MELONDS_DIR}/src

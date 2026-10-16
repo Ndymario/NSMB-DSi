@@ -31,7 +31,7 @@ void log(const char* format, ...) __attribute__((format(printf, 1, 2)));
 // --- ExtendedRam ---------------------------------------------------------
 
 // The root heap (where `new` and the game's own scene/actor/file allocations
-// come from) was moved into the upper 8MB of DSi RAM.
+// come from) was moved into the upper 7.9MB of DSi RAM.
 bool hasExtendedRam();
 
 // ~3.9MB heap at 0x02400000, free for any module to use.

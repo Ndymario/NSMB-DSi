@@ -50,6 +50,18 @@ SCENARIOS = {
         "touch": ["620:140,131", "1000:238,175", "1700:140,93"],
         "shots": [900, 1100, 1300, 1500, 1800, 2000, 2300, 2600],
     },
+    # Two consoles over local wireless: both pick Mario vs. Luigi, P1 hosts as
+    # Mario, P2 joins as Luigi, P1 confirms the rules and picks Grassland.
+    # Runs in real time (about two minutes).
+    "vs": {
+        "mp": True,
+        "frames": 3500,
+        "press": ["2350:a"],
+        "touch": ["620:140,93", "950:128,64", "1250:125,72", "1750:125,72", "2050:119,163", "2250:51,70", "2450:51,70"],
+        "press2": [],
+        "touch2": ["640:140,93", "970:128,64", "1270:125,120", "1450:125,72"],
+        "shots": [2700, 3500],
+    },
     # Title -> Mario vs. Luigi (touch): the VS menus.
     "mvsl": {
         "frames": 1400,
@@ -120,11 +132,22 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
         cmd += ["--press", p]
     for t in scenario.get("touch", []):
         cmd += ["--touch", t]
-    shots = []
+    mp = scenario.get("mp", False)
+    if mp:
+        cmd += ["--mp"]
+        for p in scenario.get("press2", []):
+            cmd += ["--press2", p]
+        for t in scenario.get("touch2", []):
+            cmd += ["--touch2", t]
+    shots, shots2 = [], []
     for f in scenario["shots"]:
         ppm = out / f"{console}_{f:05d}.ppm"
         shots.append(ppm)
         cmd += ["--shot", f"{f}:{ppm}"]
+        if mp:
+            ppm2 = out / f"{console}_p2_{f:05d}.ppm"
+            shots2.append(ppm2)
+            cmd += ["--shot2", f"{f}:{ppm2}"]
 
     flags = ["bios9", "bios7"] + (["firmware"] if console == "ds" else ["dsi_bios9", "dsi_bios7", "dsi_firmware"])
     for key in flags:
@@ -133,18 +156,21 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
 
     with tempfile.TemporaryDirectory() as tmp:
         if console == "dsi":
-            nand = pathlib.Path(tmp) / "nand.bin"
-            shutil.copyfile(paths["nand"], nand)
-            cmd += ["--nand", str(nand)]
+            for i, flag in enumerate(["--nand", "--nand2"] if mp else ["--nand"]):
+                nand = pathlib.Path(tmp) / f"nand{i}.bin"
+                shutil.copyfile(paths["nand"], nand)
+                cmd += [flag, str(nand)]
         result = subprocess.run(cmd, capture_output=True, text=True)
 
     (out / f"{console}.log").write_text(result.stderr)
     if result.returncode != 0:
         sys.stderr.write(result.stderr)
         raise SystemExit(f"harness failed for {console}")
-    pngs = [ppm_to_png(s) for s in shots]
+    pngs = [ppm_to_png(s) for s in shots] + [ppm_to_png(s) for s in shots2]
     contact_sheet(pngs, out / f"{console}_sheet.png")
     report = json.loads(result.stdout[result.stdout.index("{"):])
+    if mp:
+        report = report["players"][0]  # P1's report; P2 boots the same way
     (out / f"{console}_report.json").write_text(json.dumps(report, indent=2))
     return report
 
@@ -197,6 +223,28 @@ def check_resets(args, paths: dict) -> list:
     return problems
 
 
+def check_vs(args, paths: dict) -> list:
+    """A two-player Mario vs. Luigi match must look the same in DSi mode as in DS mode."""
+    try:
+        from PIL import Image, ImageChops
+    except ImportError:
+        return []
+    out = args.out / "vs"
+    out.mkdir(parents=True, exist_ok=True)
+    saved = args.scenario
+    args.scenario = "vs"
+    for console in ["ds", "dsi"]:
+        run(console, args, paths, out)
+    args.scenario = saved
+    # Top screen of P1 in Grassland; only the background is compared (rows above the players).
+    a, b = (Image.open(out / f"{c}_03500.png").crop((0, 0, 256, 150)) for c in ["ds", "dsi"])
+    differing = sum(1 for px in ImageChops.difference(a, b).getdata() if max(px) > 16)
+    # A correct build differs by 0 pixels; the 0x02FE71B0 corruption showed as 79.
+    ok = differing <= 32
+    print(f"vs: Grassland background {'matches DS mode' if ok else 'DIFFERS'} ({differing} pixels)")
+    return [] if ok else [f"VS Grassland background differs from DS mode ({differing} pixels)"]
+
+
 def check(console: str, report: dict) -> list:
     """What must hold for every build of the module, per console."""
     arm9, arm7 = report.get("arm9"), report["arm7"]
@@ -217,7 +265,9 @@ def check(console: str, report: dict) -> list:
         expect(arm9["scfg_ext9_now"] == "0x8307C000", "SCFG_EXT9 not reduced to NITRO behaviour + DSi resources")
         expect(arm9["console"], "DSi run not detected as DSi hardware")
         expect(arm9["root_heap"]["heap"] == "0x02800000", "root heap not in upper DSi RAM")
-        expect(arm9["root_heap"]["size"] > 8_000_000, "root heap smaller than expected")
+        expect(arm9["root_heap"]["size"] > 7_800_000, "root heap smaller than expected")
+        expect(int(arm9["root_heap"]["start"], 16) + arm9["root_heap"]["size"] <= 0x02FE0000,
+               "root heap reaches 0x02FE0000+ (DSi launcher data; melonDS fakes 0x02FE71B0)")
         expect(arm9["extended_heap"]["size"] > 4_000_000, "extended heap missing")
         expect(arm9["low_heap"]["size"] > 2_000_000, "low heap missing")
         expect(arm9["nwram_heap"]["size"] > 780_000, "NWRAM heap missing")
@@ -233,6 +283,7 @@ def main() -> int:
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default="title")
     parser.add_argument("--out", type=pathlib.Path, default=ROOT / "build/harness")
     parser.add_argument("--check", action="store_true", help="run 1-1 on both consoles and assert the invariants")
+    parser.add_argument("--vs", action="store_true", help="with --check, also play a two-console VS match (about 2 minutes)")
     for key in ["bios9", "bios7", "firmware", "dsi_bios9", "dsi_bios7", "dsi_firmware", "nand"]:
         parser.add_argument("--" + key.replace("_", "-"), dest=key)
     args = parser.parse_args()
@@ -261,7 +312,7 @@ def main() -> int:
                 print(f"  FAIL: {problem}")
                 failed = True
     if args.check:
-        for problem in check_audio(args.out) + check_resets(args, paths):
+        for problem in check_audio(args.out) + check_resets(args, paths) + (check_vs(args, paths) if args.vs else []):
             print(f"  FAIL: {problem}")
             failed = True
         print("FAILED" if failed else "all checks passed")

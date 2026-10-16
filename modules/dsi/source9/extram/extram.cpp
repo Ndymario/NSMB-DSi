@@ -11,8 +11,8 @@
 //   0x023E0000-0x02400000  MPU region 2 guard, boot leftovers  (left alone)
 //   0x02400000-0x027E0000  free                               -> extendedHeap()
 //   0x027E0000-0x02800000  ARM7 code/data, DTCM, shared area   (left alone)
-//   0x02800000-0x02FFC000  free                               -> root heap
-//   0x02FFC000-0x02FFFFFF  DSi system area (boot data, launcher)
+//   0x02800000-0x02FE0000  free                               -> root heap
+//   0x02FE0000-0x02FFFFFF  DSi launcher data and system area (left alone)
 //
 // The root heap is what nearly every allocation in the game comes from, so
 // moving it into the largest block gives vanilla code ~3.5x the memory with no
@@ -22,8 +22,11 @@
 #ifndef DSI_ROOT_HEAP_START
 #define DSI_ROOT_HEAP_START 0x02800000
 #endif
+// Not 0x02FFC000: the 112KB below the DSi system area hold launcher data DSi
+// software reads (melonDS even fakes the word at 0x02FE71B0, its region-lock
+// check, which corrupted whatever the game had stored there).
 #ifndef DSI_ROOT_HEAP_END
-#define DSI_ROOT_HEAP_END 0x02FFC000
+#define DSI_ROOT_HEAP_END 0x02FE0000
 #endif
 #ifndef DSI_EXT_HEAP_START
 #define DSI_EXT_HEAP_START 0x02400000
