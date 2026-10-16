@@ -8,7 +8,8 @@
 
 Screenshots are written as PNG plus one contact sheet per console. The DSi
 NAND is copied to a temporary file first, so your dump is never written to.
-Paths can be overridden with --bios9 etc. (see --help).
+Paths can be overridden with --bios9 etc. (see --help), and the settings
+file with $MELONDS_CONFIG.
 """
 
 import argparse
@@ -24,7 +25,12 @@ import tomllib
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 HARNESS = ROOT / ".deps/harness-build/harness"
-MELONDS_TOML = pathlib.Path.home() / "Library/Preferences/melonDS/melonDS.toml"
+# Where melonDS keeps its settings: $MELONDS_CONFIG, else the per-platform default.
+MELONDS_TOML_CANDIDATES = [
+    pathlib.Path.home() / "Library/Preferences/melonDS/melonDS.toml",       # macOS
+    pathlib.Path.home() / ".config/melonDS/melonDS.toml",                   # Linux
+    pathlib.Path(os.environ.get("APPDATA", "")) / "melonDS/melonDS.toml",   # Windows
+]
 
 # frame -> keys. Timings are for the US ROM with direct boot.
 SCENARIOS = {
@@ -47,9 +53,11 @@ SCENARIOS = {
 
 
 def melonds_paths() -> dict:
-    if not MELONDS_TOML.exists():
+    candidates = [pathlib.Path(os.environ["MELONDS_CONFIG"])] if "MELONDS_CONFIG" in os.environ else MELONDS_TOML_CANDIDATES
+    toml = next((p for p in candidates if p.is_file()), None)
+    if toml is None:
         return {}
-    cfg = tomllib.loads(MELONDS_TOML.read_text())
+    cfg = tomllib.loads(toml.read_text())
     ds, dsi = cfg.get("DS", {}), cfg.get("DSi", {})
     return {
         "bios9": ds.get("BIOS9Path"), "bios7": ds.get("BIOS7Path"), "firmware": ds.get("FirmwarePath"),

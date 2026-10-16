@@ -33,7 +33,7 @@ If something is unclear, **do not guess offsets**.
 | Nitro SDK headers | `.deps/nitrosdk/include` | Converted with NSMB-Code-Template's `convert_sdk.py`; never committed |
 | `arm-none-eabi` GCC 12+ | `PATH` | |
 | melonDS 1.1 (stock) + harness | `.deps/melonDS`, `.deps/harness-build/harness` | Headless verification, `tools/harness/` |
-| melonDS app | `/Applications/melonDS.app` | Manual play; DSi mode needs DSi BIOS/firmware/NAND and direct boot |
+| melonDS app | your install (stock 1.1 or newer) | Manual play; DSi mode needs DSi BIOS/firmware/NAND and direct boot |
 
 `.ncpatcher.env` (written by bootstrap, gitignored) sets `NSMBREF_ROOT` and
 `NSMB_NITRO_ROOT` for this project only. **NSMB-Docker and `ncpatcher.json`
@@ -612,11 +612,8 @@ Do **not** use ndspy to:
 
 ## GBATEK — Hardware Reference (NDS / DSi)
 
-Agents have access to the **GBATEK documentation** locally:
-
-```
-/Users/ndymario/NSMB-DS-Modding/GBATEK NDS Docs.html
-```
+The **GBATEK documentation** is at https://problemkaputt.de/gbatek.htm. If the
+user has a local copy, they will say where; prefer it, since it can be searched offline.
 
 This is the authoritative low-level hardware reference for:
 - Nintendo DS (NDS)
@@ -750,10 +747,9 @@ reasoning in `docs/how-it-works.md`.
 
 NITRO Developer Documentation (NitroSDK / Official APIs)
 
-Agents have access to the official NITRO Developer Documentation
-locally:
-
-/Users/ndymario/NSMB-DS-Modding/NitroDevDocs
+The official NITRO Developer Documentation is not distributed with this
+repository (it is Nintendo's). If the user has a local copy, they will say
+where it is; otherwise rely on Ghidra and GBATEK.
 
 These PDF manuals document the original Nintendo DS SDK (NitroSDK),
 including:
