@@ -27,17 +27,21 @@ void DSi_bootArm7()
 
 	if (twlMode) {
 		twl7 = true;
-		// Keep NITRO behaviour for the hardware the ARM7 code already uses.
-		twl::io<uint32_t>(twl::SCFG_EXT) = ext7 & ~twl::SCFG_EXT7_NITRO_CLEAR;
 		flags |= SHARED_TWL_MODE;
-		mirrorBootArea(); // no-op after a soft reset, or if the ARM9 got there first
-		flags |= SHARED_BOOT_AREA_OK;
+		if (startedByLoader()) {
+			// The loader has already set SCFG up for this DS game and put the
+			// boot data where NTR code reads it; leave both alone.
+			flags |= SHARED_LOADER | SHARED_BOOT_AREA_OK;
+		} else {
+			// Keep NITRO behaviour for the hardware the ARM7 code already uses.
+			twl::io<uint32_t>(twl::SCFG_EXT) = ext7 & ~twl::SCFG_EXT7_NITRO_CLEAR;
+			mirrorBootArea(); // no-op after a soft reset, or if the ARM9 got there first
+			flags |= SHARED_BOOT_AREA_OK;
+		}
 	}
 
 	blk.sndexcnt = twl::io<uint16_t>(twl::SNDEXCNT);
-	blk.scfgRom7 = twl::io<uint16_t>(twl::SCFG_ROM);
-	blk.scfgExt7 = ext7;
-	blk.mmemChecker7 = *reinterpret_cast<volatile uint16_t*>(0x027FFFFA); // HW_MMEMCHECKER_SUB
-	blk.flags = flags;
+	blk.value = ext7;
+	blk.flags = static_cast<uint8_t>(flags);
 	blk.magic = SHARED_MAGIC7;
 }

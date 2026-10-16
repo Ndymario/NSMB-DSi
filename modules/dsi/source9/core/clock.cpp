@@ -61,7 +61,9 @@ bool DSi::setFastClock(bool enable)
 {
 	using namespace dsi;
 
-	if (!state.twl || !twl::scfgUnlocked())
+	// Under a loader the clock is the loader's: nds-bootstrap patches the
+	// game's delay loops for the speed it set.
+	if (!state.twl || state.loader || !twl::scfgUnlocked())
 		return false;
 	if (!itcmStub && !(itcmStub = installStub()))
 		return false;

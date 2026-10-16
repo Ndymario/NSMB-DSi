@@ -13,6 +13,7 @@ using namespace dsi;
 
 bool DSi::isConsole()      { return state.console; }
 bool DSi::isTwlMode()      { return state.twl; }
+bool DSi::isLoaderBoot()   { return state.loader; }
 bool DSi::hasExtendedRam() { return state.extendedRam; }
 Heap* DSi::extendedHeap()  { return state.extendedHeap; }
 Heap* DSi::lowHeap()       { return state.lowHeap; }
@@ -36,12 +37,18 @@ void DSi_bootArm9()
 	if (!state.twl)
 		return;
 
+	// crt0 maps 0x02000000-0x027FFFFF only; the launcher's data sits at 0x02FFFxxx.
+	state.region1 = widenRegion1(state.region1Boot, REGION1_16MB);
+	writeRegion1(state.region1);
+
+	// A loader has set SCFG up for this DS game and put the boot data where NTR
+	// code reads it already.
+	state.loader = startedByLoader();
+	if (state.loader)
+		return;
+
 	// Keep NITRO behaviour for the hardware the game already uses.
 	twl::io<uint32_t>(twl::SCFG_EXT) = state.scfgExt9 & ~twl::SCFG_EXT9_NITRO_CLEAR;
-
-	// crt0 maps 0x02000000-0x027FFFFF only; the launcher's data sits at 0x02FFFxxx.
-	state.region1 = REGION1_16MB;
-	writeRegion1(state.region1);
 	mirrorBootArea();
 }
 
@@ -57,13 +64,17 @@ void DSi_afterOsInit()
 	if (!state.twl)
 		return;
 
-	if (DSi_nwramInit)
+	// nds-bootstrap keeps its own data in NWRAM and patches the game's delay
+	// loops for the clock it picked, so under a loader both stay as they are.
+	if (DSi_nwramInit && !state.loader)
 		DSi_nwramInit(); // may widen region 1, so it goes first
 
 	// OS_InitArenaEx shrinks region 1 to 4MB when it believes the console is retail.
 	writeRegion1(state.region1);
 
-	if (DSi_clockInit)
+	if (state.loader)
+		state.fastClock = (twl::io<uint16_t>(twl::SCFG_CLK) & 1) != 0;
+	else if (DSi_clockInit)
 		DSi_clockInit();
 	else
 		DSi::setFastClock(false);
@@ -80,7 +91,7 @@ void DSi_afterRootHeap()
 	if (state.twl) {
 		if (DSi_extramAfterRootHeap)
 			DSi_extramAfterRootHeap();
-		if (DSi_nwramAfterRootHeap)
+		if (DSi_nwramAfterRootHeap && !state.loader)
 			DSi_nwramAfterRootHeap();
 	}
 

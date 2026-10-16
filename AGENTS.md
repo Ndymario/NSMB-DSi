@@ -59,7 +59,9 @@ Minigames → title → Mario vs. Luigi mode switches and compares the frames
 wireless (real time, about 2 minutes); use it for anything touching memory or
 wireless. `tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
 `python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
-(`--dump F:ADDR:LEN`, `--dump7`, `--touch`, `--press`, `--shot`).
+(`--dump F:ADDR:LEN`, `--dump7`, `--touch`, `--press`, `--shot`, `--shot-bg`
+for a frame without sprites/3D, `--sd DIR --argv sd:/...` to boot homebrew such
+as nds-bootstrap from an SD card folder).
 
 ---
 
@@ -715,10 +717,18 @@ Established by the spike and kept true by `run.py --check`. Details and
 reasoning in `docs/how-it-works.md`.
 
 - **Boot path:** the ROM is made DSi-enhanced by `tools/twl_header.py` (unit
-  code 02h, DSi extended header, no ARM9i/ARM7i payload, TSC in NDS mode,
-  unsigned). Verified on stock melonDS 1.1 DSi direct boot. Unlaunch, TWiLight
-  Menu++/nds-bootstrap and real hardware are **unverified**; say so when
-  reporting results.
+  code 02h, DSi extended header, inert 1KB ARM9i/ARM7i stubs that TWiLight
+  Menu++ requires, TSC in NDS mode, unsigned). Verified on stock melonDS 1.1 DSi direct boot.
+- **nds-bootstrap (TWiLight Menu++):** it treats any unit code > 0 as a DSi-SDK
+  title and fails on NSMB, so the hook also writes `build/nsmb-dsi-twilight.nds`
+  (plain DS header) for "Run in: DSi mode (Forced)". The core detects a loader
+  (DSi mode + valid unit-code-0 header at `0x027FFE00`) and then touches
+  nothing but MPU region 1 (widen only, never narrow: nds-bootstrap needs 32MB)
+  and the pitch fix: no SCFG writes, no boot-data copy, no heaps, no NWRAM, no
+  clock change. Stock melonDS cannot run nds-bootstrap (SD IRQ status bit 30 is
+  missing); it was verified with that bit modelled locally, not committed.
+  Confirmed by hand on a real DSi XL (TWiLight Menu++, nds-bootstrap v2.17.0).
+  3DS and Unlaunch direct boot are **unverified**; say so when reporting results.
 - **Detection:** ARM9 `SCFG_A9ROM == 1 && SCFG_EXT9.bit31 && RAM limit >= 2`;
   ARM7 `SCFG_EXT7.bit31 && RAM limit >= 2`. DSi hardware in DS mode is seen
   only through the ARM7's `SNDEXCNT` (the ARM9 reads it as 0).
@@ -744,8 +754,9 @@ reasoning in `docs/how-it-works.md`.
   the main arena is `Memory::initRootHeap`; main and all 131 overlays were checked.
   `0x02400000-0x027E0000` and the old arena become spare heaps. NWRAM-A/B/C maps
   to the ARM9 at `0x03000000` with region 1 = `0x02000031`.
-- **Shared ARM7->ARM9 block:** `0x027FFA40-0x027FFA5F` (NTR SDK marks
-  `0x027FFA00-0x027FFA7F` unused; co-op uses `0x027FFA7E`).
+- **Shared ARM7->ARM9 block:** `0x027FFC24-0x027FFC2B`, 8 bytes, which the NTR
+  SDK marks unused and the boot-data copy skips. Not `0x027FFA00-0x027FFA7F`:
+  nds-bootstrap uses `0x027FFA0C` and `0x027FFA40`, co-op uses `0x027FFA7E`.
 - **Clock:** `SCFG_CLK.bit0` is written only from a stub in the ITCM arena with
   IRQs off (GBATEK requirement).
 

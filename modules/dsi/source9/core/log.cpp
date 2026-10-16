@@ -52,7 +52,8 @@ void dsi::logBootSummary()
 		return;
 	}
 
-	DSi::log("[DSi] DSi mode: ARM9 %s MHz, root heap %p (%u KB)",
+	DSi::log("[DSi] DSi mode%s: ARM9 %s MHz, root heap %p (%u KB)",
+		state.loader ? " (set up by a loader)" : "",
 		state.fastClock ? "134" : "67", Memory::rootHeapPtr, kilobytes(Memory::rootHeapPtr));
 	DSi::log("[DSi] extra heaps: extended %u KB, low %u KB, NWRAM %u KB",
 		kilobytes(state.extendedHeap), kilobytes(state.lowHeap), kilobytes(state.nwramHeap));

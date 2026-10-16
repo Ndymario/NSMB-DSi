@@ -18,6 +18,13 @@
 // moving it into the largest block gives vanilla code ~3.5x the memory with no
 // other patch. Only Memory::initRootHeap reads the main arena (checked against
 // main and all 131 overlays), so changing the arena is all it takes.
+//
+// Under a loader (nds-bootstrap with "Run in: DSi mode (forced)", as
+// TWiLight Menu++ starts it) nothing is added. nds-bootstrap patches the
+// game's MPU setup (32MB region 1, no region 2 guard), so the NTR SDK takes
+// the 8MB layout and the root heap already runs up to 0x027C0000, about 6.3MB.
+// Most of the rest is nds-bootstrap's: its card engine and cache tables just
+// below 0x02800000, and its ROM cache at 0x02800000-0x02FFF000.
 
 #ifndef DSI_ROOT_HEAP_START
 #define DSI_ROOT_HEAP_START 0x02800000
@@ -53,6 +60,9 @@ Heap* makeHeap(void* start, void* end)
 
 extern "C" void DSi_extramBeforeRootHeap()
 {
+	if (dsi::state.loader)
+		return;
+
 	lowStart = OS_GetArenaLo(OS_ARENA_MAIN);
 	lowEnd = OS_GetArenaHi(OS_ARENA_MAIN);
 
@@ -63,6 +73,9 @@ extern "C" void DSi_extramBeforeRootHeap()
 extern "C" void DSi_extramAfterRootHeap()
 {
 	using dsi::state;
+
+	if (state.loader)
+		return;
 
 	state.extendedRam = Memory::rootHeapPtr != nullptr;
 	if (!state.extendedRam)

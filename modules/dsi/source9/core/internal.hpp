@@ -9,6 +9,7 @@ namespace dsi {
 struct State {
 	bool console;
 	bool twl;
+	bool loader;      // DSi mode set up by a loader (nds-bootstrap), see startedByLoader()
 	bool extendedRam;
 	bool fastClock;
 	uint16_t scfgA9Rom;
@@ -31,6 +32,16 @@ void logBootSummary();
 // 0x03000000, which is what the DSi launcher itself uses for TWL titles.
 constexpr uint32_t REGION1_16MB = 0x0200002F;
 constexpr uint32_t REGION1_32MB = 0x02000031;
+
+// Region 1 widened to cover at least `wanted` (same base), never narrowed: a
+// loader may already have set it wider (nds-bootstrap uses 32MB so its card
+// engine can reach the file tables it keeps at 0x03700000).
+inline uint32_t widenRegion1(uint32_t current, uint32_t wanted)
+{
+	const auto size = [](uint32_t r) { return (r >> 1) & 0x1F; };
+	const bool usable = (current & 1) && (current & 0xFFFFF000) == (wanted & 0xFFFFF000);
+	return usable && size(current) >= size(wanted) ? current : wanted;
+}
 
 inline uint32_t readRegion1()
 {

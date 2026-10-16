@@ -23,13 +23,16 @@ A module cannot declare build hooks, so copy `tools/twl_header.py` and add:
 ```yaml
 hooks:
   - name: Make the ROM DSi-enhanced
-    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}"'
+    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}" --ds-copy build/mymod-twilight.nds'
     when: post-build
 ```
 
 Without this step the module still builds and runs, but nothing boots the
 game in DSi mode, so it stays a no-op. `tools/twl_header.py --check ROM`
-verifies a finished ROM.
+verifies a finished ROM. `--ds-copy` also saves the ROM with its plain DS
+header, which is the file to give TWiLight Menu++ / nds-bootstrap users (with
+the game set to "Run in: DSi mode (Forced)"); see
+[how-it-works.md](how-it-works.md#running-from-the-sd-card-twilight-menu--nds-bootstrap).
 
 ## 3. Choose components
 
@@ -44,7 +47,7 @@ modules:
           Report: { enabled: false }          # always, for releases
           NWram: { enabled: false }
           ExtendedRam:
-            defines: { DSI_ROOT_HEAP_END: 0x02F00000 }   # leave room for a loader
+            defines: { DSI_ROOT_HEAP_END: 0x02F00000 }   # keep 0x02F00000+ for yourself
 ```
 
 | Component | Requires | Provides |
@@ -89,6 +92,9 @@ Rules:
   does nothing on hardware, so it is safe to leave in.
 - **Plain `new` already benefits.** The root heap is 3.4x larger in DSi mode,
   so most mods get more headroom without calling the API at all.
+- **Under nds-bootstrap there are no extra heaps.** `DSi::isLoaderBoot()` is
+  true, `isTwlMode()` stays true, the root heap is about 6.3MB (nds-bootstrap's
+  setup), and `extendedHeap`, `lowHeap` and `nwramHeap` are `nullptr`.
 
 ## NSMB co-op
 
@@ -97,7 +103,7 @@ addresses:
 - **DSiModeWarn** hooks ARM7 `0x037FCEEC`, overlay 1 BootScene, and the shared
   word `0x027FFA7E`.
 - **This module** hooks ARM7 `0x037F846C`, the five ARM9 `main0` sites in
-  [how-it-works.md](how-it-works.md), and the shared block `0x027FFA40-0x027FFA5F`.
+  [how-it-works.md](how-it-works.md), and the shared block `0x027FFC24-0x027FFC2B`.
 
 One catch: DSiModeWarn decides "DS CPU mode" by checking for an nds-bootstrap
 patch, so in DSi mode it would still warn even though the ARM9 runs at 134MHz.

@@ -7,12 +7,23 @@ Cartridge Header". The result is unsigned: Unlaunch, TWiLight Menu++ /
 nds-bootstrap and emulators boot it in DSi mode; the stock DSi menu does not.
 
 The game code stays the same, so saves, cheats and per-game loader settings
-keep working. There is no ARM9i/ARM7i payload: the module's code lives in the
-normal binaries and only needs the launcher to leave the console in DSi mode.
+keep working. The module's code lives in the normal binaries and only needs the
+launcher to leave the console in DSi mode, so the ARM9i/ARM7i binaries are
+small inert stubs. They exist because TWiLight Menu++ refuses a DSi-enhanced
+ROM whose ARM9i/ARM7i offsets are below 8000h or whose first 16 bytes are all
+00h, all FFh or the same as at 8000h ("The DSi binaries are missing"; see
+checkDsiBinaries() in its ndsheaderbanner.cpp).
+
+nds-bootstrap (what TWiLight Menu++ uses to run games from the SD card) only
+runs DSi-enhanced ROMs in DSi mode if they were built with the DSi SDK, which
+NSMB was not. It does run plain DS ROMs in DSi mode when the game's "Run in"
+setting is "DSi mode (forced)", so --ds-copy also writes the untouched DS ROM
+for that.
 
 Usage:
-  twl_header.py ROM            patch ROM in place
-  twl_header.py --check ROM    verify ROM already has the expected DSi header
+  twl_header.py ROM                   patch ROM in place
+  twl_header.py ROM --ds-copy OUT     also save the ROM as it was (DS header) to OUT first
+  twl_header.py --check ROM           verify ROM already has the expected DSi header
 """
 
 import argparse
@@ -35,10 +46,17 @@ APP_FLAGS = 0x00
 # only treat the ARM9i/ARM7i entries as valid when it is set.
 DSI_FLAGS = 0x01
 
-# Dedicated ARM9i/ARM7i load areas. With size 0 nothing is loaded, but GBATEK
-# notes the RAM address must still be a valid nonzero one.
+# Dedicated ARM9i/ARM7i load areas (GBATEK's usual addresses). The launcher
+# copies the stubs there before the game starts; nothing runs or reads them,
+# and the module's heaps later reuse both areas.
 ARM9I_RAM = 0x02400000
 ARM7I_RAM = 0x02E80000
+STUB_SIZE = 0x400
+
+
+def stub(name: str) -> bytes:
+    text = f"NSMB-DSi {name} stub: not executed, see tools/twl_header.py".encode()
+    return text.ljust(STUB_SIZE, b"\0")
 
 # [1B0h] region-free; [1B4h] no access to SD, NAND or AES keys.
 REGION_FREE = 0xFFFFFFFF
@@ -77,7 +95,8 @@ def banner_size(rom: bytes, offset: int) -> int:
     return {1: 0x840, 2: 0x940, 3: 0xA40, 0x103: 0x23C0}.get(version, 0x840)
 
 
-def expected_header(rom: bytes) -> bytearray:
+def expected_image(rom: bytes) -> tuple[bytearray, int, bytes]:
+    """Returns the patched header, and where the stubs go and their bytes."""
     hdr = bytearray(rom[:0x1000])
     if hdr[0x012] not in (0x00, 0x02):
         raise SystemExit(f"error: unit code {hdr[0x012]:#04x} is neither NDS nor NDS+DSi")
@@ -89,43 +108,79 @@ def expected_header(rom: bytes) -> bytearray:
 
     used = struct.unpack_from("<I", hdr, 0x080)[0]
     twl_start = (used + TWL_ALIGN - 1) // TWL_ALIGN
+    arm9i_rom = twl_start * TWL_ALIGN
+    arm7i_rom = arm9i_rom + STUB_SIZE
+    stubs = stub("ARM9i") + stub("ARM7i")
 
     hdr[0x012] = 0x02
     hdr[0x01C] = DSI_FLAGS
     struct.pack_into("<HH", hdr, 0x090, twl_start, twl_start)
     hdr[0x180:0x1B0] = MBK_SETTINGS
     struct.pack_into("<IIIxxxB", hdr, 0x1B0, REGION_FREE, ACCESS_CONTROL, SCFG_EXT7, APP_FLAGS)
-    struct.pack_into("<IIII", hdr, 0x1C0, 0, 0, ARM9I_RAM, 0)          # ARM9i: rom, reserved, ram, size
-    struct.pack_into("<IIII", hdr, 0x1D0, 0, 0, ARM7I_RAM, 0)          # ARM7i: rom, SD list, ram, size
+    struct.pack_into("<IIII", hdr, 0x1C0, arm9i_rom, 0, ARM9I_RAM, STUB_SIZE)  # ARM9i: rom, reserved, ram, size
+    struct.pack_into("<IIII", hdr, 0x1D0, arm7i_rom, 0, ARM7I_RAM, STUB_SIZE)  # ARM7i: rom, SD list, ram, size
     struct.pack_into("<I", hdr, 0x208, banner_size(rom, struct.unpack_from("<I", hdr, 0x068)[0]))
-    struct.pack_into("<I", hdr, 0x210, used)
+    struct.pack_into("<I", hdr, 0x210, arm9i_rom + len(stubs))         # total used, including the TWL area
     hdr[0x230:0x234] = hdr[0x00C:0x010][::-1]                          # title ID: game code reversed
     hdr[0x234:0x238] = bytes([0x00, 0x00, 0x03, 0x00])                 # cartridge, DSi
     hdr[0x2F0:0x300] = bytes([0x80] * 0x10)                            # no age restrictions
     struct.pack_into("<H", hdr, 0x15E, crc16(hdr[:HEADER_CRC_END]))
-    return hdr
+    return hdr, arm9i_rom, stubs
+
+
+def twilight_accepts(rom: bytes) -> bool:
+    """TWiLight Menu++'s checkDsiBinaries(), for a unit code 02h ROM."""
+    arm9i_rom = struct.unpack_from("<I", rom, 0x1C0)[0]
+    arm7i_rom = struct.unpack_from("<I", rom, 0x1D0)[0]
+    reference = rom[0x8000:0x8010]
+    for offset in (arm9i_rom, arm7i_rom):
+        if not 0x8000 <= offset < 0x20000000:
+            return False
+        sig = rom[offset:offset + 0x10].ljust(0x10, b"\0")
+        if sig in (reference, bytes(0x10), b"\xFF" * 0x10):
+            return False
+    return True
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("rom")
     parser.add_argument("--check", action="store_true", help="only verify, do not write")
+    parser.add_argument("--ds-copy", metavar="OUT", help="write the unpatched (DS header) ROM here before patching")
     args = parser.parse_args()
 
     with open(args.rom, "rb") as f:
         rom = f.read()
 
-    hdr = expected_header(rom)
+    if args.ds_copy and not args.check:
+        if rom[0x012] != 0x00:
+            raise SystemExit(f"error: {args.rom} already has a DSi header; rebuild before --ds-copy")
+        with open(args.ds_copy, "wb") as f:
+            f.write(rom)
+        print(f"{args.ds_copy}: DS header copy for TWiLight Menu++ / nds-bootstrap")
+
+    hdr, stubs_at, stubs = expected_image(rom)
     if args.check:
         if rom[:0x1000] != bytes(hdr):
             diff = [i for i in range(0x1000) if rom[i] != hdr[i]]
             print(f"{args.rom}: DSi header differs at {len(diff)} byte(s), first at {diff[0]:#05x}")
+            return 1
+        if rom[stubs_at:stubs_at + len(stubs)] != stubs:
+            print(f"{args.rom}: ARM9i/ARM7i stubs missing at {stubs_at:#x}")
+            return 1
+        if not twilight_accepts(rom):
+            print(f"{args.rom}: TWiLight Menu++ would report the DSi binaries as missing")
             return 1
         print(f"{args.rom}: DSi-enhanced header OK")
         return 0
 
     with open(args.rom, "r+b") as f:
         f.write(hdr)
+        if len(rom) < stubs_at:
+            f.seek(len(rom))
+            f.write(b"\xFF" * (stubs_at - len(rom)))
+        f.seek(stubs_at)
+        f.write(stubs)
     print(f"{args.rom}: unit code 02h (NDS+DSi), SCFG_EXT7 {SCFG_EXT7:#010x}, TSC in NDS mode")
     return 0
 

@@ -10,6 +10,10 @@
 // variants of the per-player flags: --press2, --touch2, --shot2, --wav2, --nand2.
 // Both consoles run at real-time speed, as in the melonDS frontend.
 //
+// With --sd DIR, the DSi gets an SD card built from DIR (melonDS syncs changes
+// back into DIR on exit). Booting nds-bootstrap with --rom then runs the game
+// the way TWiLight Menu++ does on hardware: tools/harness/run.py --bootstrap.
+//
 // BIOS/firmware/NAND paths come from flags (see --help); tools/harness/run.py
 // fills them in from your melonDS settings.
 
@@ -75,7 +79,7 @@ const std::map<std::string, int> KEYS = {
 };
 
 struct Press { u32 frame, hold, mask; };
-struct Shot { u32 frame; std::string path; };
+struct Shot { u32 frame; std::string path; bool backgroundOnly = false; };
 struct Dump { u32 frame, address, length; bool arm7; std::string path; };
 struct Touch { u32 frame, hold; u16 x, y; };
 
@@ -96,6 +100,8 @@ struct Options {
 	bool mp = false;
 	Script player[2];
 	bool report = false;
+	std::string sd;
+	std::string argv; // command line for homebrew (argv[0] = its own path on the SD card)
 	std::string bios9, bios7, firmware;
 	std::string dsiBios9, dsiBios7, dsiFirmware;
 };
@@ -137,7 +143,11 @@ Options parse(int argc, char** argv)
 		else if (a == "--rom") o.rom = next();
 		else if (a == "--frames") o.frames = std::stoul(next());
 		else if (a == "--press") sc.presses.push_back(parsePress(next()));
-		else if (a == "--shot") { auto s = next(); auto c = s.find(':'); sc.shots.push_back({(u32)std::stoul(s.substr(0, c)), s.substr(c + 1)}); }
+		else if (a == "--shot" || a == "--shot-bg") {
+			// --shot-bg renders that frame with sprites (OBJ) and 3D switched off on both screens
+			auto s = next(); auto c = s.find(':');
+			sc.shots.push_back({(u32)std::stoul(s.substr(0, c)), s.substr(c + 1), a == "--shot-bg"});
+		}
 		else if (a == "--dump" || a == "--dump7") {
 			// F:ADDR:LEN, hex address and length; --dump7 reads through the ARM7 bus
 			unsigned f, addr, len;
@@ -170,10 +180,12 @@ Options parse(int argc, char** argv)
 		else if (a == "--dsi-bios7") o.dsiBios7 = next();
 		else if (a == "--dsi-firmware") o.dsiFirmware = next();
 		else if (a == "--nand") sc.nand = next();
+		else if (a == "--sd") o.sd = next();
+		else if (a == "--argv") o.argv = next();
 		else if (a == "--help" || a == "-h") {
 			puts("harness --rom ROM [--console ds|dsi] [--frames N] [--report] [--log debug|info|warn|error]\n"
-			     "        [--press F[+HOLD]:keys] [--touch F[+HOLD]:X,Y] [--shot F:out.ppm] [--dump F:ADDR:LEN] [--dump7 ...] [--wav out.wav]\n"
-			     "        [--bios9 F --bios7 F --firmware F] [--dsi-bios9 F --dsi-bios7 F --dsi-firmware F --nand F]\n"
+			     "        [--press F[+HOLD]:keys] [--touch F[+HOLD]:X,Y] [--shot F:out.ppm] [--shot-bg F:out.ppm] [--dump F:ADDR:LEN] [--dump7 ...] [--wav out.wav]\n"
+			     "        [--bios9 F --bios7 F --firmware F] [--dsi-bios9 F --dsi-bios7 F --dsi-firmware F --nand F] [--sd DIR [--argv sd:/PATH]]\n"
 			     "        [--mp] [--press2 ...] [--touch2 ...] [--shot2 ...] [--wav2 ...] [--nand2 F]");
 			exit(0);
 		}
@@ -183,6 +195,8 @@ Options parse(int argc, char** argv)
 		die("--rom is required");
 	if (o.console != "ds" && o.console != "dsi")
 		die("--console must be ds or dsi");
+	if (!o.sd.empty() && (o.console != "dsi" || o.mp))
+		die("--sd needs --console dsi and one console");
 	return o;
 }
 
@@ -225,16 +239,47 @@ std::unique_ptr<NDS> makeConsole(const Options& o, int inst)
 	if (!nand)
 		die("cannot parse NAND " + sc.nand);
 
+	std::optional<FATStorage> sd;
+	if (!o.sd.empty()) {
+		std::string dir = o.sd;
+		while (dir.size() > 1 && dir.back() == '/')
+			dir.pop_back();
+		// 512MB FAT image next to the folder, rebuilt from it on every run.
+		std::remove((dir + ".img").c_str());
+		sd.emplace(FATStorageArgs{dir + ".img", 512u << 20, false, dir});
+	}
+
 	DSiArgs dsiArgs{
 		std::move(args),
 		readBios<DSiBIOSSize>(o.dsiBios9),
 		std::move(bios7i),
 		std::move(nand),
-		std::nullopt,
+		std::move(sd),
 		false, // FullBIOSBoot
 		true,  // DSP HLE
 	};
 	return std::make_unique<DSi>(std::move(dsiArgs), userdata);
+}
+
+// libnds's argv block, as launchers such as TWiLight Menu++ pass it: the
+// string goes after the ARM9 binary, its address and length at 0x02FFFE70.
+// homebrew such as nds-bootstrap needs argv[0] to find its own NitroFS.
+void setArgv(NDS& nds, const std::vector<u8>& rom, const std::string& argv)
+{
+	u32 ramAddr, size;
+	memcpy(&ramAddr, &rom[0x28], 4);
+	memcpy(&size, &rom[0x2C], 4);
+	const u32 base = (ramAddr + size + 0xF) & ~0xFu;
+	std::vector<char> text(argv.begin(), argv.end());
+	text.resize((text.size() + 1 + 3) & ~3u, '\0');
+	for (u32 i = 0; i < text.size(); i += 4) {
+		u32 word;
+		memcpy(&word, &text[i], 4);
+		nds.ARM9Write32(base + i, word);
+	}
+	nds.ARM9Write32(0x02FFFE70, 0x5F617267); // "_arg"
+	nds.ARM9Write32(0x02FFFE74, base);
+	nds.ARM9Write32(0x02FFFE78, argv.size() + 1);
 }
 
 void writePPM(NDS& nds, const std::string& path)
@@ -294,20 +339,26 @@ void printReport(NDS& nds)
 {
 	dsi::SharedBlock blk{};
 	readMem(nds, DSI_SHARED_BLOCK, &blk, sizeof blk);
-	printf("{\n  \"arm7\": {\"magic_ok\": %s, \"flags\": %u, \"sndexcnt\": \"%s\", \"scfg_rom7\": \"%s\", \"scfg_ext7\": \"%s\", \"mmem_checker7\": %u},\n",
-	       blk.magic == dsi::SHARED_MAGIC7 ? "true" : "false", blk.flags, hex(blk.sndexcnt).c_str(),
-	       hex(blk.scfgRom7).c_str(), hex(blk.scfgExt7).c_str(), blk.mmemChecker7);
-
+	// Once the Report component has run, the block's value is its address and
+	// the SCFG_EXT7 that ARM7 found is in the report's copy of the block.
+	const bool hasReport = blk.magic == dsi::SHARED_MAGIC7 && (blk.flags & dsi::SHARED_REPORT);
 	dsi::BootReport r{};
-	if (blk.arm9Report)
-		readMem(nds, blk.arm9Report, &r, sizeof r);
-	if (r.magic != dsi::REPORT_MAGIC || r.version != dsi::REPORT_VERSION) {
+	if (hasReport)
+		readMem(nds, blk.value, &r, sizeof r);
+	const bool reportOk = r.magic == dsi::REPORT_MAGIC && r.version == dsi::REPORT_VERSION;
+	const dsi::SharedBlock& arm7 = reportOk ? r.arm7 : blk;
+	printf("{\n  \"arm7\": {\"magic_ok\": %s, \"flags\": %u, \"sndexcnt\": \"%s\", \"scfg_ext7\": \"%s\"},\n",
+	       arm7.magic == dsi::SHARED_MAGIC7 ? "true" : "false", arm7.flags & ~dsi::SHARED_REPORT,
+	       hex(arm7.sndexcnt).c_str(), hex(arm7.value).c_str());
+
+	if (!reportOk) {
 		printf("  \"arm9\": null\n}\n");
 		return;
 	}
 	printf("  \"arm9\": {\n");
-	printf("    \"address\": \"%s\", \"console\": %s, \"twl\": %s,\n", hex(blk.arm9Report).c_str(),
-	       (r.flags & 1) ? "true" : "false", (r.flags & 2) ? "true" : "false");
+	printf("    \"address\": \"%s\", \"console\": %s, \"twl\": %s, \"loader\": %s,\n",
+	       hex(blk.value).c_str(), (r.flags & 1) ? "true" : "false", (r.flags & 2) ? "true" : "false",
+	       (r.flags & 16) ? "true" : "false");
 	printf("    \"scfg_a9rom\": \"%s\", \"scfg_clk\": \"%s\", \"scfg_ext9_boot\": \"%s\", \"scfg_ext9_now\": \"%s\",\n",
 	       hex(r.scfgA9Rom).c_str(), hex(r.scfgClk).c_str(), hex(r.scfgExt9Boot).c_str(), hex(r.scfgExt9Now).c_str());
 	printf("    \"mbk\": [");
@@ -365,6 +416,16 @@ void play(const Options& o, NDS& nds, const Script& sc)
 				touch = &t;
 		if (touch) nds.TouchScreen(touch->x, touch->y);
 		else nds.ReleaseScreen();
+		for (const Shot& s : sc.shots)
+			if (s.frame == frame && s.backgroundOnly)
+				for (u32 dispcnt : {0x04000000u, 0x04001000u}) {
+					// DISPCNT bit 12: OBJ on; bit 8: BG0 on, bit 3: BG0 is the 3D layer
+					// (NSMB's players, enemies and items are 3D models).
+					u32 v = nds.ARM9Read32(dispcnt) & ~(1u << 12);
+					if (v & (1u << 3))
+						v &= ~(1u << 8);
+					nds.ARM9Write32(dispcnt, v);
+				}
 		nds.RunFrame();
 		if (!sc.wav.empty()) {
 			s16 chunk[4096 * 2];
@@ -413,6 +474,8 @@ int main(int argc, char** argv)
 		consoles[inst]->Reset();
 		consoles[inst]->SetNDSCart(std::move(cart));
 		consoles[inst]->SetupDirectBoot(o.rom);
+		if (!o.argv.empty())
+			setArgv(*consoles[inst], rom, o.argv);
 		consoles[inst]->Start();
 	}
 
@@ -425,6 +488,9 @@ int main(int argc, char** argv)
 	}
 
 	fprintf(stderr, "harness: %u save write(s)\n", Platform::g_saveWrites);
+	for (int inst = 0; inst < count; inst++)
+		fprintf(stderr, "harness: console %d ended with ARM9 PC %08X, ARM7 PC %08X\n",
+			inst + 1, consoles[inst]->ARM9.R[15], consoles[inst]->ARM7.R[15]);
 	if (o.report) {
 		if (count == 2) printf("{\"players\": [\n");
 		for (int inst = 0; inst < count; inst++) {

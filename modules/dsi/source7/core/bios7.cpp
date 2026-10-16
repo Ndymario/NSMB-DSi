@@ -8,6 +8,10 @@
 // set r0=(0..2FFh)-46Ah on DSi". NSMB's sound driver (SND_CalcTimer) gets
 // every note's timer from it, so without this the music plays at wrong pitches.
 //
+// nds-bootstrap has its own fix, which it applies only where it finds this
+// veneer unchanged; replacing it here means exactly one fix applies under
+// nds-bootstrap too.
+//
 // It is the only DSi7 BIOS difference NSMB runs into: of the ARM7's SVC
 // wrappers, only GetPitchTable and GetVolumeTable have callers, and
 // GetVolumeTable is unaffected.

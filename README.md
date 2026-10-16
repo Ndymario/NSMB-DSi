@@ -18,8 +18,12 @@ Figures from `tools/harness/run.py --check` on stock melonDS 1.1.
 > - title screen, menus, touch, sound, saves, the opening cutscene, the world map and World 1-1 all work;
 > - DS mode is unchanged.
 >
-> Not tested yet: Unlaunch, TWiLight Menu++ / nds-bootstrap, and real DSi/3DS
-> hardware. The ROM header is unsigned, so the stock DSi menu will not launch it.
+> On a **real DSi XL** it runs in DSi mode through TWiLight Menu++ /
+> nds-bootstrap v2.17.0 (the Mega Mushroom logo sound plays). There the game
+> gets 134MHz and a 6.3MB root heap; see
+> [how-it-works.md](docs/how-it-works.md#running-from-the-sd-card-twilight-menu--nds-bootstrap).
+> Not tested yet: a 3DS, Unlaunch booting the DSi-enhanced ROM directly.
+> The ROM header is unsigned, so the stock DSi menu will not launch it.
 
 ## How it works, in short
 
@@ -71,6 +75,24 @@ logs a summary through the no$gba debug port at boot.
 ```
 
 In DS mode it prints `[DSi] DS mode: module inactive, game unchanged`.
+
+### On a real DSi or 3DS (TWiLight Menu++)
+
+The build also writes `build/nsmb-dsi-twilight.nds`, the same game with a plain
+DS header. nds-bootstrap only runs DSi-SDK games in DSi mode, so it cannot use
+the DSi-enhanced file ("An error has occurred"), but it can run this one in
+DSi mode:
+
+1. Copy `build/nsmb-dsi-twilight.nds` to the SD card and use a recent
+   nds-bootstrap (tested with v2.17.0).
+2. In TWiLight Menu++, open the game's settings and set **Run in** to
+   **DSi mode (Forced)**. Leave the CPU speed at its default.
+3. Start it. The Nintendo logo plays the Mega Mushroom sound in DSi mode and
+   the usual coin sound in DS mode.
+
+nds-bootstrap keeps its ROM cache in the upper 8MB and uses NWRAM itself, so
+there the game gets 134MHz and a root heap of about 6.3MB (nds-bootstrap's own
+setup), and the module adds no heaps of its own.
 
 ## Using the module in your own project
 

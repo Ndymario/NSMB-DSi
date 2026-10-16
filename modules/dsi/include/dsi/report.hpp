@@ -11,7 +11,7 @@
 namespace dsi {
 
 constexpr uint32_t REPORT_MAGIC = 0x39695344; // "DSi9"
-constexpr uint32_t REPORT_VERSION = 3;
+constexpr uint32_t REPORT_VERSION = 4;
 constexpr int REPORT_WORK_WINDOW = 64;
 constexpr int REPORT_ARENAS = 7; // main, main-subpriv, main-ex, ITCM, DTCM, shared, WRAM-main
 
@@ -26,7 +26,8 @@ struct HeapInfo {
 struct BootReport {
 	uint32_t magic;
 	uint32_t version;
-	uint32_t flags;          // bit0 DSi console, bit1 DSi mode, bit2 extended RAM, bit3 fast clock
+	uint32_t flags;          // bit0 DSi console, bit1 DSi mode, bit2 extended RAM, bit3 fast clock,
+	                         // bit4 loader boot
 	uint16_t scfgA9Rom;
 	uint16_t scfgClk;
 	uint32_t scfgExt9Boot;   // before the module changed anything

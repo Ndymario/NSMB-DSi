@@ -66,7 +66,8 @@ extern "C" void DSi_collectReport()
 	r.magic = REPORT_MAGIC;
 	r.version = REPORT_VERSION;
 	r.flags = (state.console ? 1u : 0u) | (state.twl ? 2u : 0u)
-		| (state.extendedRam ? 4u : 0u) | (state.fastClock ? 8u : 0u);
+		| (state.extendedRam ? 4u : 0u) | (state.fastClock ? 8u : 0u)
+		| (state.loader ? 16u : 0u);
 	r.scfgA9Rom = state.scfgA9Rom;
 	r.scfgExt9Boot = state.scfgExt9;
 	r.scfgExt9Now = twl::io<uint32_t>(twl::SCFG_EXT);
@@ -107,7 +108,8 @@ extern "C" void DSi_collectReport()
 	describe(r.low, state.lowHeap);
 	describe(r.nwram, state.nwramHeap);
 
-	shared().arm9Report = reinterpret_cast<uintptr_t>(&r);
+	shared().value = reinterpret_cast<uintptr_t>(&r);
+	shared().flags |= SHARED_REPORT;
 	flush();
 }
 

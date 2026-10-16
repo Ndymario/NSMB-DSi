@@ -30,7 +30,7 @@ hooks:
   # NCPatcher writes NTR headers only; this turns the output into a DSi-enhanced
   # (TWL) ROM so DSi-mode loaders boot it with SCFG unlocked and 16MB mapped.
   - name: Make the ROM DSi-enhanced
-    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}"'
+    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}" --ds-copy build/nsmb-dsi-twilight.nds'
     when: post-build
 
 targets:

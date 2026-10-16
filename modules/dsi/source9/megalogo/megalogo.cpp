@@ -10,15 +10,17 @@
 // The Mega Mushroom sound lives in a sound group the game has not loaded yet
 // at that point, and the game's own sound heap has no room for it. So, in DSi
 // mode only, the group is loaded into a private NNS sound heap carved out of
-// DSi::extendedHeap(), and the heap is destroyed again when the logo scene
-// ends. Destroying it runs NNS's dispose callbacks, which clear the sound
+// DSi::extendedHeap() (or, under nds-bootstrap, which has no extended heap but
+// lets the root heap grow to ~6.3MB, out of the root heap), and the heap is
+// destroyed again when the logo scene ends. Destroying it runs NNS's dispose callbacks, which clear the sound
 // archive's file pointers before the title screen loads its own sounds. If
 // anything fails, the original ding plays.
 
 namespace {
 
-constexpr u32 SOUND_HEAP_SIZE = 0x100000; // 1MB of the ~4MB extended heap, for a few seconds
+constexpr u32 SOUND_HEAP_SIZE = 0x100000; // 1MB, for a few seconds
 
+Heap* soundHeapParent;
 void* soundHeapMemory;
 NNSSndHeapHandle soundHeap;
 
@@ -27,7 +29,7 @@ void releaseSoundHeap()
 	if (soundHeap)
 		NNS_SndHeapDestroy(soundHeap);
 	if (soundHeapMemory)
-		DSi::extendedHeap()->deallocate(soundHeapMemory);
+		soundHeapParent->deallocate(soundHeapMemory);
 	soundHeap = nullptr;
 	soundHeapMemory = nullptr;
 }
@@ -35,8 +37,11 @@ void releaseSoundHeap()
 bool loadMegaSound()
 {
 	Heap* heap = DSi::extendedHeap();
+	if (!heap && DSi::isLoaderBoot())
+		heap = Memory::rootHeapPtr;
 	if (!heap || !(soundHeapMemory = heap->allocate(SOUND_HEAP_SIZE, 32)))
 		return false;
+	soundHeapParent = heap;
 
 	soundHeap = NNS_SndHeapCreate(soundHeapMemory, SOUND_HEAP_SIZE);
 	if (soundHeap && NNS_SndArcLoadGroup(SndGroupID::GROUP_VS_SE, soundHeap))

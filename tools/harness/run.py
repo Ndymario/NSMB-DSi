@@ -61,6 +61,9 @@ SCENARIOS = {
         "press2": [],
         "touch2": ["640:140,93", "970:128,64", "1270:125,120", "1450:125,72"],
         "shots": [2700, 3500],
+        # Grassland with sprites hidden: the Big Star spawns at a random spot,
+        # which shifts with the smallest timing change, so only backgrounds compare.
+        "bg_shots": [3500],
     },
     # Title -> Mario vs. Luigi (touch): the VS menus.
     "mvsl": {
@@ -140,6 +143,8 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
         for t in scenario.get("touch2", []):
             cmd += ["--touch2", t]
     shots, shots2 = [], []
+    for f in scenario.get("bg_shots", []):
+        cmd += ["--shot-bg", f"{f}:{out / f'{console}_bg_{f:05d}.ppm'}"]
     for f in scenario["shots"]:
         ppm = out / f"{console}_{f:05d}.ppm"
         shots.append(ppm)
@@ -236,8 +241,8 @@ def check_vs(args, paths: dict) -> list:
     for console in ["ds", "dsi"]:
         run(console, args, paths, out)
     args.scenario = saved
-    # Top screen of P1 in Grassland; only the background is compared (rows above the players).
-    a, b = (Image.open(out / f"{c}_03500.png").crop((0, 0, 256, 150)) for c in ["ds", "dsi"])
+    # Top screen of P1 in Grassland, rendered without sprites and 3D models.
+    a, b = (Image.open(ppm_to_png(out / f"{c}_bg_03500.ppm")).crop((0, 0, 256, 192)) for c in ["ds", "dsi"])
     differing = sum(1 for px in ImageChops.difference(a, b).getdata() if max(px) > 16)
     # A correct build differs by 0 pixels; the 0x02FE71B0 corruption showed as 79.
     ok = differing <= 32
@@ -262,6 +267,7 @@ def check(console: str, report: dict) -> list:
             expect(arm9[heap]["heap"] == "0x00000000", f"DS run created {heap}")
     else:
         expect(arm9["twl"] and arm7["flags"] == 7, "DSi run not detected as DSi mode (ARM7 flags should be 7)")
+        expect(not arm9["loader"], "direct boot mistaken for a loader (nds-bootstrap) boot")
         expect(arm9["scfg_ext9_now"] == "0x8307C000", "SCFG_EXT9 not reduced to NITRO behaviour + DSi resources")
         expect(arm9["console"], "DSi run not detected as DSi hardware")
         expect(arm9["root_heap"]["heap"] == "0x02800000", "root heap not in upper DSi RAM")

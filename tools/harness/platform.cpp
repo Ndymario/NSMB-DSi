@@ -31,6 +31,11 @@ FileHandle* OpenFile(const std::string& path, FileMode mode)
 	if ((mode & NoCreate) && access(path.c_str(), F_OK) != 0)
 		return nullptr;
 
+	// Preserve keeps an existing file's contents but still creates a missing
+	// one (melonDS creates its SD card image this way).
+	if ((mode & Preserve) && !(mode & NoCreate) && access(path.c_str(), F_OK) != 0)
+		mode = static_cast<FileMode>(mode & ~Preserve);
+
 	const char* m;
 	if (mode & Append)                  m = (mode & Read) ? "a+b" : "ab";
 	else if ((mode & ReadWrite) == ReadWrite) m = (mode & Preserve) ? "r+b" : "w+b";
