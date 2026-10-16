@@ -81,6 +81,7 @@ struct Options {
 	std::vector<Dump> dumps;
 	std::vector<Touch> touches;
 	bool report = false;
+	std::string wav;
 	std::string bios9, bios7, firmware;
 	std::string dsiBios9, dsiBios7, dsiFirmware, nand;
 };
@@ -134,6 +135,7 @@ Options parse(int argc, char** argv)
 			o.touches.push_back({f, hold, (u16)x, (u16)y});
 		}
 		else if (a == "--report") o.report = true;
+		else if (a == "--wav") o.wav = next();
 		else if (a == "--log") { auto l = next(); Platform::g_logLevel = l == "debug" ? 0 : l == "info" ? 1 : l == "warn" ? 2 : 3; }
 		else if (a == "--bios9") o.bios9 = next();
 		else if (a == "--bios7") o.bios7 = next();
@@ -211,6 +213,22 @@ void writePPM(NDS& nds, const std::string& path)
 			fwrite(rgb, 1, 3, f);
 		}
 	}
+	fclose(f);
+}
+
+// 16-bit stereo PCM at the SPU's output rate (48kHz by default).
+void writeWav(const std::string& path, const std::vector<s16>& samples, u32 rate)
+{
+	FILE* f = fopen(path.c_str(), "wb");
+	if (!f)
+		die("cannot write " + path);
+	u32 dataSize = samples.size() * sizeof(s16);
+	auto u32le = [f](u32 v) { fwrite(&v, 4, 1, f); };
+	auto u16le = [f](u16 v) { fwrite(&v, 2, 1, f); };
+	fwrite("RIFF", 1, 4, f); u32le(36 + dataSize); fwrite("WAVEfmt ", 1, 8, f);
+	u32le(16); u16le(1); u16le(2); u32le(rate); u32le(rate * 4); u16le(4); u16le(16);
+	fwrite("data", 1, 4, f); u32le(dataSize);
+	fwrite(samples.data(), sizeof(s16), samples.size(), f);
 	fclose(f);
 }
 
@@ -295,6 +313,7 @@ int main(int argc, char** argv)
 	nds->SetupDirectBoot(o.rom);
 	nds->Start();
 
+	std::vector<s16> audio;
 	size_t shot = 0;
 	for (u32 frame = 1; frame <= o.frames; frame++) {
 		u32 held = 0;
@@ -309,6 +328,12 @@ int main(int argc, char** argv)
 		if (touch) nds->TouchScreen(touch->x, touch->y);
 		else nds->ReleaseScreen();
 		nds->RunFrame();
+		if (!o.wav.empty()) {
+			s16 chunk[4096 * 2];
+			int n;
+			while ((n = nds->SPU.ReadOutput(chunk, 4096)) > 0)
+				audio.insert(audio.end(), chunk, chunk + n * 2);
+		}
 		for (const Shot& s : o.shots)
 			if (s.frame == frame) {
 				writePPM(*nds, s.path);
@@ -324,6 +349,8 @@ int main(int argc, char** argv)
 	}
 
 	fprintf(stderr, "harness: %u save write(s)\n", Platform::g_saveWrites);
+	if (!o.wav.empty())
+		writeWav(o.wav, audio, 48000);
 	if (o.report)
 		printReport(*nds);
 	return 0;

@@ -94,7 +94,7 @@ components you can switch off, and notes on NSMB co-op.
 
 | Component | What it does | Default |
 |---|---|---|
-| `Core`, `Core7` | DSi detection, boot data fix-up, public API | always on |
+| `Core`, `Core7` | DSi detection, boot data fix-up, DSi-BIOS sound fix, public API | always on |
 | `ExtendedRam` | Root heap to `0x02800000` (8MB); `extendedHeap` (4MB), `lowHeap` (2.3MB) | on |
 | `FastClock` | ARM9 at 134MHz; without it the core sets 67MHz | on |
 | `NWram` | 768KB of new shared WRAM as `nwramHeap` | on |
@@ -110,7 +110,8 @@ python3 tools/harness/run.py --check
 ```
 
 It writes contact sheets and JSON reports to `build/harness/`, and exits non-zero if an invariant
-breaks: DS mode must stay vanilla, and DSi mode must get every resource.
+breaks: DS mode must stay vanilla, DSi mode must get every resource, and the
+DSi-mode music must match the DS-mode music (if numpy is installed).
 BIOS, firmware and NAND paths are read from your melonDS settings. The NAND is
 copied first, so your dump is never written to.
 

@@ -92,7 +92,8 @@ def contact_sheet(pngs: list, out: pathlib.Path) -> None:
 
 def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
     scenario = SCENARIOS[args.scenario]
-    cmd = [str(HARNESS), "--console", console, "--rom", str(args.rom), "--frames", str(scenario["frames"]), "--report"]
+    cmd = [str(HARNESS), "--console", console, "--rom", str(args.rom), "--frames", str(scenario["frames"]), "--report",
+           "--wav", str(out / f"{console}.wav")]
     for p in scenario["press"]:
         cmd += ["--press", p]
     shots = []
@@ -121,6 +122,30 @@ def run(console: str, args, paths: dict, out: pathlib.Path) -> dict:
     report = json.loads(result.stdout[result.stdout.index("{"):])
     (out / f"{console}_report.json").write_text(json.dumps(report, indent=2))
     return report
+
+
+def music_spectrum(wav: pathlib.Path):
+    """Average magnitude spectrum of the title-screen music (seconds 6-14)."""
+    import numpy as np
+    import wave
+    with wave.open(str(wav)) as w:
+        left = np.frombuffer(w.readframes(w.getnframes()), dtype="<i2")[0::2].astype(float)
+    seg, win = left[6 * 48000:14 * 48000], 8192
+    frames = [np.abs(np.fft.rfft(seg[i:i + win] * np.hanning(win))) for i in range(0, len(seg) - win, win // 2)]
+    freqs = np.fft.rfftfreq(win, 1 / 48000)
+    band = (freqs > 60) & (freqs < 4000)
+    return np.log1p(np.mean(frames, axis=0)[band])
+
+
+def check_audio(out: pathlib.Path) -> list:
+    """DSi mode must sound like DS mode: same notes at the same pitches."""
+    try:
+        import numpy as np
+    except ImportError:
+        return []  # optional dependency; the other checks still run
+    similarity = float(np.corrcoef(music_spectrum(out / "ds.wav"), music_spectrum(out / "dsi.wav"))[0, 1])
+    print(f"audio: DSi vs DS spectral similarity {similarity:.3f}")
+    return [] if similarity > 0.98 else [f"DSi audio differs from DS (similarity {similarity:.3f})"]
 
 
 def check(console: str, report: dict) -> list:
@@ -186,6 +211,9 @@ def main() -> int:
                 print(f"  FAIL: {problem}")
                 failed = True
     if args.check:
+        for problem in check_audio(args.out):
+            print(f"  FAIL: {problem}")
+            failed = True
         print("FAILED" if failed else "all checks passed")
     return 1 if failed else 0
 

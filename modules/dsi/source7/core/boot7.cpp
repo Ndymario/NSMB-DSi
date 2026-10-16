@@ -1,11 +1,14 @@
 #include "dsi/shared.hpp"
 #include "dsi/twl_regs.hpp"
+#include "internal7.hpp"
 
 // ARM7 side of the core. Runs once, before the ARM7 OS_Init, which is before
 // the ARM7 answers the ARM9's PXI handshake. That ordering is what lets the
 // ARM9 trust the shared block once its own OS_Init has returned.
 
 using namespace dsi;
+
+namespace dsi { bool twl7; }
 
 // NitroSpMain+0x4 (0x037F846C): `bl OS_Init`, ARM mode, the ARM7's first call.
 // Verified against the clean US ARM7 (autoload at 0x037F8000).
@@ -23,6 +26,7 @@ void DSi_bootArm7()
 		&& ((ext7 & twl::SCFG_EXT_RAM_MASK) >> twl::SCFG_EXT_RAM_SHIFT) >= twl::SCFG_EXT_RAM_16MB;
 
 	if (twlMode) {
+		twl7 = true;
 		flags |= SHARED_TWL_MODE;
 		mirrorBootArea();
 		flags |= SHARED_BOOT_COPIED;

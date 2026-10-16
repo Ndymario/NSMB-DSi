@@ -24,10 +24,11 @@ two things:
 | First game code | ARM9 | `0x020056A8` App::branchToStartup (reached from crt0's NitroStartUp, before OS_Init and NitroMain) | Detects DSi mode: `SCFG_A9ROM = 1`, `SCFG_EXT9` access bit set, RAM limit 16MB. In DSi mode it widens MPU region 1 to 16MB and copies the boot data as well. Both CPUs copy, so neither has to wait for the other. |
 | After `OS_Init` | ARM9 | `0x02004E44` App::commonStartup: `bl Memory::initRootHeap` | Reads the ARM7's shared block. The PXI handshake guarantees it is filled in by now. Maps NWRAM, re-asserts region 1 (OS_Init shrinks it to 4MB), sets the clock, and points the main arena at `0x02800000-0x02FFC000`. |
 | After the root heap exists | ARM9 | `0x02004E48` App::commonStartup: `bl 0x02012764` (empty) | Creates `extendedHeap`, `lowHeap` and `nwramHeap`; fills in the report. |
+| Every pitch lookup | ARM7 | `0x037FF5A0` `_Ven_SVC_GetPitchTable` (replaced) | Works around the DSi BIOS `GetPitchTable` bug in DSi mode (see below). |
 | Every frame (Report only) | ARM9 | `0x02004F14` / `0x02004F18` App::gameLoop: around `waitVBlankIntr` | Samples heap free sizes and the CPU time spent per frame. |
 
-Every hook is an `ncp_hook` on an ARM-mode instruction in `main0` (no overlay
-IDs). The addresses come from disassembling the clean US binaries, named with
+Every patch is in `main0` or ARM7 main (no overlay IDs) and on ARM-mode code.
+All are `ncp_hook`s except the pitch-table veneer, which is an `ncp_jump`. The addresses come from disassembling the clean US binaries, named with
 symbols from NSMB-Code-Reference `ac82391`. Each was then confirmed at runtime
 by the harness: hook order, register values, and the report contents.
 
@@ -42,6 +43,20 @@ load anything. The ranges are listed in
 [`dsi/shared.hpp`](../modules/dsi/include/dsi/shared.hpp). The arena table and
 exception vector at `0x027FFD80-0x027FFDFF` are deliberately skipped, because
 `OS_Init` fills those in on its own.
+
+### Why the ARM7 needs a BIOS fix
+
+In DSi mode the ARM7 runs the DSi BIOS instead of the NDS one. GBATEK lists
+its differences. NSMB's ARM7 has wrappers for every SWI, but only two have
+callers: `GetVolumeTable` (unchanged on DSi) and `GetPitchTable`. On the
+DSi7 BIOS `GetPitchTable` is bugged: it reads the sine table. The sound
+driver's `SND_CalcTimer` uses it for every note, so the music came out at the
+wrong pitches. Measured, the dominant notes dropped from 287–498Hz to 64–223Hz.
+
+The module replaces the ARM-to-THUMB veneer that calls the wrapper. In DSi mode
+it subtracts `46Ah` from the index (GBATEK's workaround), then issues the SWI
+itself. In DS mode the index passes through untouched. `run.py --check` now
+compares the title music's spectrum between the DS and DSi runs.
 
 ### Why the root heap moves
 
@@ -103,7 +118,10 @@ All measured with `tools/harness` on stock melonDS 1.1 (interpreter, direct boot
 
 - **Gameplay works in DSi mode.** The run covers title, menus, a new file, the
   intro, the world map, entering 1-1, playing, dying and going back to the map.
-  Touch input, sound channels and save writes behave exactly as in DS mode.
+  Touch input and save writes behave as in DS mode.
+- **Sound matches DS mode.** The title music's averaged spectrum has 0.999
+  correlation with the DS run, with the same dominant pitches. Before the
+  pitch-table fix it was 0.36.
 - **RAM.** The root heap grows from 2.3MB to 8.0MB. Its lowest free size during
   the run goes from 0.37MB to 6.0MB.
 - **Clock.** Median CPU time per frame standing in 1-1 is 2046 ticks (3.9ms) in

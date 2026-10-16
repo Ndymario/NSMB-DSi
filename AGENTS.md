@@ -50,7 +50,8 @@ python3 tools/harness/run.py --check                      # DS + DSi runs, asser
 ```
 
 `--check` boots the ROM in DS and DSi mode, plays into World 1-1, and reads the
-`Report` component's data out of emulated RAM. Look at
+`Report` component's data out of emulated RAM. It also compares the title
+music's spectrum between DS and DSi mode (needs numpy). Look at
 `build/harness/*_sheet.png` as well as the verdict. Other useful commands:
 `tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
 `python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
@@ -721,6 +722,10 @@ reasoning in `docs/how-it-works.md`.
   - boot data lives at `0x02FFFxxx`, not `0x027FFxxx`. Both CPUs copy it before
     their `OS_Init`;
   - `OS_Init` shrinks MPU region 1 to 4MB. The core re-widens it after `OS_Init`;
+  - the ARM7 runs the DSi BIOS, whose `GetPitchTable` (SWI 1Bh) reads the sine
+    table. The core replaces the veneer at `0x037FF5A0` and applies GBATEK's
+    `-46Ah` index fix in DSi mode. No other DSi7 BIOS difference is reachable:
+    only GetPitchTable/GetVolumeTable have callers;
   - the ARM7's RAM-size probe reports "8MB" (value 2), which is harmless.
 - **Hook order on ARM9:** crt0 calls `NitroStartUp`, which runs
   `App::commonStartup` and `OS_Init`, **before** `NitroMain`. Code that must
