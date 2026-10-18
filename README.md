@@ -97,8 +97,7 @@ setup), and the module adds no heaps of its own.
 ## Using the module in your own project
 
 Copy `modules/dsi` into your project's `modules/` directory and enable it.
-Then add the post-build hook that makes the ROM DSi-enhanced, along with
-`tools/twl_header.py`. Other modules can use the API in
+Then set `dsi-enhanced: true` under `rom:` in your `ncpatcher.yaml`. Other modules can use the API in
 [`dsi/dsi.hpp`](modules/dsi/include/dsi/dsi.hpp):
 
 ```cpp
@@ -150,7 +149,6 @@ modules/dsi/          the module (module.yaml, include/dsi, source9, source7)
 ncpatcher.yaml        development project: vanilla ROM + this module
 tools/bootstrap.sh    pinned dependencies into .deps/
 tools/ncp.sh          runs the pinned ncpatcher
-tools/twl_header.py   post-build: NTR header -> DSi-enhanced header
 tools/harness/        headless melonDS runner and checks
 docs/                 how it works, integrating
 ```

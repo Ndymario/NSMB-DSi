@@ -9,6 +9,10 @@ rom:
   file: rom.nds
   output: build/nsmb-dsi.nds
   backup: backup
+  # DSi-enhanced header, so DSi-mode loaders boot it with SCFG unlocked and 16MB
+  # mapped. The copy keeps the DS header for TWiLight Menu++ / nds-bootstrap.
+  dsi-enhanced: true
+  ds-copy: build/nsmb-dsi-twilight.nds
 
 toolchain: arm-none-eabi-
 
@@ -25,13 +29,6 @@ modules:
   dump: build/generated/modules.json
   enabled:
     - dsi
-
-hooks:
-  # NCPatcher writes NTR headers only; this turns the output into a DSi-enhanced
-  # (TWL) ROM so DSi-mode loaders boot it with SCFG unlocked and 16MB mapped.
-  - name: Make the ROM DSi-enhanced
-    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}" --ds-copy build/nsmb-dsi-twilight.nds'
-    when: post-build
 
 targets:
   arm7:

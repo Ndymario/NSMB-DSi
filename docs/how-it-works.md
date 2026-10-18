@@ -7,7 +7,7 @@ runs an NTR cartridge in **DS mode**: 4MB of RAM (mirrored every 4MB), SCFG
 locked, 67MHz. Nothing the game does can get out of that. Changing that takes
 two things:
 
-1. **Get booted in DSi mode.** `tools/twl_header.py` marks the ROM as
+1. **Get booted in DSi mode.** NCPatcher's `rom.dsi-enhanced` marks the ROM as
    DSi-enhanced (unit code `02h`, plus a DSi extended header). A DSi-mode loader
    then keeps the console in DSi mode: 16MB of unmirrored RAM, SCFG and MBK
    registers accessible, NWRAM mapped from the header. The module's code lives
@@ -149,7 +149,7 @@ stray NTR-era aliases into that range still fault instead of corrupting a heap.
 
 ## The DSi-enhanced header
 
-`tools/twl_header.py` sets the following fields (GBATEK, "DSi Cartridge Header"):
+`rom.dsi-enhanced` sets the following fields (GBATEK, "DSi Cartridge Header"):
 
 | Field | Value | Why |
 |---|---|---|
@@ -166,7 +166,7 @@ stray NTR-era aliases into that range still fault instead of corrupting a heap.
 The game code stays `A2DE`, so saves, cheats and per-game loader settings carry
 over. The header is not signed.
 
-The same hook also writes `build/nsmb-dsi-twilight.nds` first: the ROM exactly
+`rom.ds-copy` also writes `build/nsmb-dsi-twilight.nds` first: the ROM exactly
 as NCPatcher built it, with the plain DS header. That is the file for
 TWiLight Menu++.
 

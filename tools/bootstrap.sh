@@ -10,7 +10,7 @@
 set -euo pipefail
 
 NCPATCHER_REPO=https://github.com/TheGameratorT/NCPatcher.git
-NCPATCHER_REV=aeb4c10702414cdb373f9510d35db514010b7e5c
+NCPATCHER_REV=9f830757fac7b5034c76ada981cc5e34b2519c3e
 NSMBREF_REPO=https://github.com/MammaMiaTeam/NSMB-Code-Reference.git
 NSMBREF_REV=ac823910c51fca86145f6cf136728fa1d5ee6bc7
 TEMPLATE_REPO=https://github.com/MammaMiaTeam/NSMB-Code-Template.git
