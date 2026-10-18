@@ -1,7 +1,7 @@
 #pragma once
 
 // The NWRAM layout the NWram component sets up, as register values.
-// tools/twl_header.py writes the same numbers into the cartridge header
+// NCPatcher's rom.dsi-enhanced writes the same numbers into the cartridge header
 // (keep the two in sync). GBATEK "DSi New Shared WRAM (for ARM7, ARM9, DSP)".
 
 #include <stdint.h>

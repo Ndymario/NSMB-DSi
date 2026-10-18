@@ -18,20 +18,22 @@ a working example; it matches the NSMB-Code-Template / co-op layout.
 
 ## 2. Make the output DSi-enhanced
 
-A module cannot declare build hooks, so copy `tools/twl_header.py` and add:
+A module cannot change the ROM header, so set this in your project's
+`ncpatcher.yaml` (needs an NCPatcher with `rom.dsi-enhanced`):
 
 ```yaml
-hooks:
-  - name: Make the ROM DSi-enhanced
-    run: '"${env.NCP_PYTHON:-python3}" tools/twl_header.py "${rom.output}" --ds-copy build/mymod-twilight.nds'
-    when: post-build
+rom:
+  file: rom.nds
+  output: build/mymod.nds
+  backup: backup
+  dsi-enhanced: true
+  ds-copy: build/mymod-twilight.nds   # optional
 ```
 
-Without this step the module still builds and runs, but nothing boots the
-game in DSi mode, so it stays a no-op. `tools/twl_header.py --check ROM`
-verifies a finished ROM. `--ds-copy` also saves the ROM with its plain DS
-header, which is the file to give TWiLight Menu++ / nds-bootstrap users (with
-the game set to "Run in: DSi mode (Forced)"); see
+Without this the module still builds and runs, but nothing boots the
+game in DSi mode, so it stays a no-op. `ds-copy` also saves the ROM with its
+plain DS header, which is the file to give TWiLight Menu++ / nds-bootstrap
+users (with the game set to "Run in: DSi mode (Forced)"); see
 [how-it-works.md](how-it-works.md#running-from-the-sd-card-twilight-menu--nds-bootstrap).
 
 ## 3. Choose components

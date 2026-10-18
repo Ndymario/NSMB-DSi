@@ -10,7 +10,7 @@
 //
 // NSMB's NTR code never touches it: the ARM7 keeps the old 32K shared WRAM at
 // 0x037F8000 and its own WRAM at 0x03800000, neither of which overlaps, and
-// the DSP is unused. tools/twl_header.py writes the same layout into the
+// the DSP is unused. NCPatcher's rom.dsi-enhanced writes the same layout into the
 // cartridge header so the launcher maps it before the game starts; doing it
 // again here keeps the result independent of how faithfully a loader applies
 // the header.

@@ -58,7 +58,7 @@ Minigames → title → Mario vs. Luigi mode switches and compares the frames
 `run.py --check --vs` adds a two-console Mario vs. Luigi match over local
 wireless (real time, about 2 minutes); use it for anything touching memory or
 wireless. `tools/ncp.sh config validate`, `tools/ncp.sh modules explain DSi.ExtendedRam`,
-`python3 tools/twl_header.py --check build/nsmb-dsi.nds`, and the raw harness
+and the raw harness
 (`--dump F:ADDR:LEN`, `--dump7`, `--touch`, `--press`, `--shot`, `--shot-bg`
 for a frame without sprites/3D, `--sd DIR --argv sd:/...` to boot homebrew such
 as nds-bootstrap from an SD card folder).
@@ -75,7 +75,7 @@ modules/dsi/
   source9/<component>/  one directory per optional component
   source7/core/         ARM7 boot hook
 ncpatcher.yaml          dev project: vanilla ROM + this module + post-build header hook
-tools/                  bootstrap.sh, ncp.sh, twl_header.py, harness/
+tools/                  bootstrap.sh, ncp.sh, harness/
 docs/                   how-it-works.md, integrating.md
 ```
 
@@ -716,11 +716,11 @@ Both must align before patching hardware behavior.
 Established by the spike and kept true by `run.py --check`. Details and
 reasoning in `docs/how-it-works.md`.
 
-- **Boot path:** the ROM is made DSi-enhanced by `tools/twl_header.py` (unit
+- **Boot path:** the ROM is made DSi-enhanced by NCPatcher's `rom.dsi-enhanced` (unit
   code 02h, DSi extended header, inert 1KB ARM9i/ARM7i stubs that TWiLight
   Menu++ requires, TSC in NDS mode, unsigned). Verified on stock melonDS 1.1 DSi direct boot.
 - **nds-bootstrap (TWiLight Menu++):** it treats any unit code > 0 as a DSi-SDK
-  title and fails on NSMB, so the hook also writes `build/nsmb-dsi-twilight.nds`
+  title and fails on NSMB, so `rom.ds-copy` also writes `build/nsmb-dsi-twilight.nds`
   (plain DS header) for "Run in: DSi mode (Forced)". The core detects a loader
   (DSi mode + valid unit-code-0 header at `0x027FFE00`) and then touches
   nothing but MPU region 1 (widen only, never narrow: nds-bootstrap needs 32MB)
